@@ -4,6 +4,9 @@
 
   /* Add your custom configuration here. */
   "compilerOptions": {
+     "target": "ESNext",
+    "module": "ESNext",
+    "moduleResolution": "bundler", // <--- Change "node" to "bundler"
     "strict": false
   }
 }

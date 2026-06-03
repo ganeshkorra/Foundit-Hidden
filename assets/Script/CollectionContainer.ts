@@ -1,7 +1,7 @@
-// FILE: CollectionContainer.ts (Final version with UI Panel Animation)
+// FILE: CollectionContainer.ts
 
 import { _decorator, Component, Node, Label, ProgressBar, director, Vec3, tween, Sprite, SpriteFrame, AudioSource, UITransform, UIOpacity, Prefab, instantiate, ParticleSystem2D } from 'cc';
-import { CollectibleCoin, COLLECT_COIN_EVENT } from './CollectibleCoin';
+import { CollectibleCoin, COLLECT_COIN_EVENT, ITEM_TAPPED_EVENT } from './CollectibleCoin';
 
 const { ccclass, property } = _decorator;
 
@@ -9,6 +9,9 @@ export const CONTAINER_COMPLETE_EVENT = 'container-complete';
 
 @ccclass('CollectionContainer')
 export class CollectionContainer extends Component {
+    private static activeSelectedItem: CollectibleCoin | null = null;
+    private static activeSelectedContainer: CollectionContainer | null = null;
+    private static isWrongPairFeedbackActive: boolean = false;
 
     // --- All properties are the same ---
     @property(Sprite)
@@ -34,27 +37,196 @@ export class CollectionContainer extends Component {
     private collectedItems: number = 0;
     private isComplete: boolean = false;
     private originalScale: Vec3 = new Vec3(1, 1, 1);
+    private selectedItem: CollectibleCoin | null = null;
+    private collectedPairIds: Set<string> = new Set();
 
     onLoad() {
-        this.totalItems = this.collectibleItems.length;
+        this.totalItems = this.getCollectionGoalCount();
         this.updateUI();
-        director.on(COLLECT_COIN_EVENT, this.onItemClicked, this);
+        director.on(ITEM_TAPPED_EVENT, this.onItemTapped, this);
         this.originalScale.set(this.node.scale); // Store the panel's original scale
     }
 
     onDestroy() {
-        director.off(COLLECT_COIN_EVENT, this.onItemClicked, this);
+        director.off(ITEM_TAPPED_EVENT, this.onItemTapped, this);
+        if (CollectionContainer.activeSelectedContainer === this) {
+            CollectionContainer.activeSelectedContainer = null;
+            CollectionContainer.activeSelectedItem = null;
+        }
     }
 
-    private onItemClicked(itemNode: Node, spriteFrame: SpriteFrame, worldPos: Vec3) {
-        if (this.isComplete || this.collectibleItems.indexOf(itemNode) === -1) {
+    private onItemTapped(item: CollectibleCoin) {
+        if (CollectionContainer.isWrongPairFeedbackActive) {
             return;
         }
-        itemNode.getComponent(CollectibleCoin)?.onCollectionStart();
-        this.playCollectionEffects(spriteFrame, worldPos);
+
+        const itemNode = item.node;
+        const ownsItem = this.collectibleItems.indexOf(itemNode) !== -1;
+
+        if (!ownsItem) {
+            return;
+        }
+
+        if (this.isComplete || item.isAlreadyCollected()) {
+            return;
+        }
+
+        if (!this.itemIcon) {
+            return;
+        }
+
+        const pairId = item.getPairId();
+        if (!pairId) {
+            this.collectSingleItem(item);
+            return;
+        }
+
+        if (this.collectedPairIds.has(pairId)) {
+            return;
+        }
+
+        const activeItem = CollectionContainer.activeSelectedItem;
+        const activeContainer = CollectionContainer.activeSelectedContainer;
+        if (activeItem && activeItem !== item) {
+            if (!activeItem.node?.isValid || activeItem.isAlreadyCollected()) {
+                CollectionContainer.activeSelectedItem = null;
+                CollectionContainer.activeSelectedContainer = null;
+            } else {
+                const activePairId = activeItem.getPairId();
+                if (activePairId === pairId) {
+                    activeContainer?.playPairMerge(activeItem, item);
+                    if (activeContainer) {
+                        activeContainer.selectedItem = null;
+                    }
+                    CollectionContainer.activeSelectedItem = null;
+                    CollectionContainer.activeSelectedContainer = null;
+                    return;
+                }
+
+                this.playWrongPairFeedback(activeItem, item);
+                return;
+            }
+        }
+
+        if (!this.selectedItem) {
+            this.selectedItem = item;
+            CollectionContainer.activeSelectedItem = item;
+            CollectionContainer.activeSelectedContainer = this;
+            item.selectForMerge();
+            return;
+        }
+
+        if (this.selectedItem === item) {
+            return;
+        }
+
+        if (this.selectedItem.getPairId() === pairId) {
+            this.playPairMerge(this.selectedItem, item);
+            this.selectedItem = null;
+            CollectionContainer.activeSelectedItem = null;
+            CollectionContainer.activeSelectedContainer = null;
+            return;
+        }
+
+        this.playWrongPairFeedback(this.selectedItem, item);
     }
 
-    private playCollectionEffects(flyingSpriteFrame: SpriteFrame, startWorldPos: Vec3) {
+    private playWrongPairFeedback(previousItem: CollectibleCoin, tappedItem: CollectibleCoin) {
+        CollectionContainer.isWrongPairFeedbackActive = true;
+        const previousContainer = CollectionContainer.activeSelectedContainer;
+
+        if (previousContainer) {
+            previousContainer.selectedItem = null;
+        }
+        this.selectedItem = null;
+        CollectionContainer.activeSelectedItem = null;
+        CollectionContainer.activeSelectedContainer = null;
+
+        previousItem.stopSelectionPulse();
+        tappedItem.stopSelectionPulse();
+        previousItem.playWrongPairJerk();
+        tappedItem.playWrongPairJerk();
+
+        this.scheduleOnce(() => {
+            CollectionContainer.isWrongPairFeedbackActive = false;
+        }, 0.4);
+    }
+
+    private collectSingleItem(item: CollectibleCoin) {
+        const spriteFrame = item.getSpriteFrame();
+        if (!spriteFrame) return;
+
+        const startWorldPos = item.node.worldPosition.clone();
+        const sourceNodes = [item.node];
+        item.onCollectionStart();
+        this.playCollectionEffects(spriteFrame, startWorldPos, sourceNodes);
+    }
+
+    private playPairMerge(firstItem: CollectibleCoin, secondItem: CollectibleCoin) {
+        const pairId = firstItem.getPairId();
+        if (!pairId || pairId !== secondItem.getPairId() || !this.itemIcon) return;
+
+        const canvas = this.node.scene.getChildByName('Canvas');
+        if (!canvas) { console.error("Canvas node not found!"); return; }
+
+        const canvasTransform = canvas.getComponent(UITransform);
+        if (!canvasTransform) { console.error("Canvas UITransform not found!"); return; }
+
+        const firstSpriteFrame = firstItem.getSpriteFrame();
+        const secondSpriteFrame = secondItem.getSpriteFrame();
+        const finalSpriteFrame = this.getFinalSpriteFrame(firstItem, secondItem) ?? secondSpriteFrame ?? firstSpriteFrame;
+        if (!firstSpriteFrame || !secondSpriteFrame || !finalSpriteFrame) return;
+
+        const firstWorldPos = firstItem.node.worldPosition.clone();
+        const secondWorldPos = secondItem.node.worldPosition.clone();
+        const centerLocalPos = new Vec3(0, 0, 0);
+        const firstStartLocal = canvasTransform.convertToNodeSpaceAR(firstWorldPos);
+        const secondStartLocal = canvasTransform.convertToNodeSpaceAR(secondWorldPos);
+        const firstScale = firstItem.node.scale.clone();
+        const secondScale = secondItem.node.scale.clone();
+        const sourceNodes = [firstItem.node, secondItem.node];
+
+        secondItem.selectForMerge();
+        firstItem.onCollectionStart();
+        secondItem.onCollectionStart();
+        this.collectedPairIds.add(pairId);
+
+        const firstMergeNode = this.createFlyingSpriteNode(canvas, firstSpriteFrame, firstStartLocal, firstScale);
+        const secondMergeNode = this.createFlyingSpriteNode(canvas, secondSpriteFrame, secondStartLocal, secondScale);
+        const mergeDuration = 0.45;
+
+        tween(firstMergeNode)
+            .to(mergeDuration, { position: centerLocalPos, scale: new Vec3(firstScale.x * 1.12, firstScale.y * 1.12, firstScale.z) }, { easing: 'cubicOut' })
+            .call(() => { firstMergeNode.destroy(); })
+            .start();
+
+        tween(secondMergeNode)
+            .to(mergeDuration, { position: centerLocalPos, scale: new Vec3(secondScale.x * 1.12, secondScale.y * 1.12, secondScale.z) }, { easing: 'cubicOut' })
+            .call(() => { secondMergeNode.destroy(); })
+            .start();
+
+        tween(this.node)
+            .delay(mergeDuration)
+            .call(() => {
+                const finalNode = this.createFinalItemDisplayNode(canvas, firstItem, secondItem, finalSpriteFrame, centerLocalPos);
+                const finalScale = finalNode.scale.clone();
+                finalNode.setScale(0.05, 0.05, finalScale.z);
+
+                tween(finalNode)
+                    .to(0.18, { scale: new Vec3(finalScale.x * 1.18, finalScale.y * 1.18, finalScale.z) }, { easing: 'backOut' })
+                    .to(0.14, { scale: finalScale }, { easing: 'sineOut' })
+                    .delay(0.25)
+                    .call(() => {
+                        const finalWorldPos = finalNode.worldPosition.clone();
+                        finalNode.destroy();
+                        this.playCollectionEffects(finalSpriteFrame, finalWorldPos, sourceNodes);
+                    })
+                    .start();
+            })
+            .start();
+    }
+
+    private playCollectionEffects(flyingSpriteFrame: SpriteFrame, startWorldPos: Vec3, sourceNodes: Node[]) {
         if (!this.itemIcon) { console.error("Item Icon target is not set!"); return; }
         const canvas = this.node.scene.getChildByName('Canvas');
         if (!canvas) { console.error("Canvas node not found!"); return; }
@@ -111,6 +283,7 @@ export class CollectionContainer extends Component {
                 this.updateUI();
                 if (this.itemCollectSound) this.itemCollectSound.play();
                 if (this.collectedItems >= this.totalItems) this.onContainerComplete();
+                director.emit(COLLECT_COIN_EVENT, sourceNodes[0], flyingSpriteFrame, targetWorldPos, sourceNodes);
             })
             .start();
     }
@@ -137,7 +310,7 @@ export class CollectionContainer extends Component {
         }
        if (this.progressLabel) { // This check is 'false' because progressLabel is null!
         // This line is NEVER RUNNING for the Apple container
-        this.progressLabel.string = `${this.collectedItems}/${this.totalItems}`;
+        this.progressLabel.string = `${this.collectedItems}`;
     }
     }
 
@@ -159,6 +332,72 @@ export class CollectionContainer extends Component {
     public resetContainer() {
         this.collectedItems = 0;
         this.isComplete = false;
+        this.collectedPairIds.clear();
+        this.clearSelectedItem();
+        this.totalItems = this.getCollectionGoalCount();
         this.updateUI();
+    }
+
+    public getCollectionGoalCount() {
+        const pairIds = new Set<string>();
+        let unpairedItems = 0;
+
+        this.collectibleItems.forEach(itemNode => {
+            const collectible = itemNode.getComponent(CollectibleCoin);
+            const pairId = collectible?.getPairId() ?? '';
+            if (pairId) {
+                pairIds.add(pairId);
+            } else {
+                unpairedItems++;
+            }
+        });
+
+        return pairIds.size + unpairedItems;
+    }
+
+    private clearSelectedItem() {
+        if (this.selectedItem && this.selectedItem.node?.isValid) {
+            this.selectedItem.clearSelection();
+        }
+        if (CollectionContainer.activeSelectedContainer === this) {
+            CollectionContainer.activeSelectedItem = null;
+            CollectionContainer.activeSelectedContainer = null;
+        }
+        this.selectedItem = null;
+    }
+
+    private createFlyingSpriteNode(parent: Node, spriteFrame: SpriteFrame, position: Vec3, scale: Vec3) {
+        const node = new Node("MergeItem");
+        parent.addChild(node);
+        const sprite = node.addComponent(Sprite);
+        sprite.spriteFrame = spriteFrame;
+        node.setPosition(position);
+        node.setScale(scale);
+        return node;
+    }
+
+    private createFinalItemDisplayNode(parent: Node, firstItem: CollectibleCoin, secondItem: CollectibleCoin, fallbackFrame: SpriteFrame, position: Vec3) {
+        const finalTemplate = firstItem.finalItemNode ?? secondItem.finalItemNode;
+        let finalNode: Node;
+
+        if (finalTemplate) {
+            finalNode = instantiate(finalTemplate);
+        } else {
+            finalNode = new Node("FinalMergedItem");
+            const sprite = finalNode.addComponent(Sprite);
+            sprite.spriteFrame = fallbackFrame;
+            finalNode.setScale(0.35, 0.35, 1);
+        }
+
+        parent.addChild(finalNode);
+        finalNode.active = true;
+        finalNode.setPosition(position);
+        return finalNode;
+    }
+
+    private getFinalSpriteFrame(firstItem: CollectibleCoin, secondItem: CollectibleCoin) {
+        const firstFinalSprite = firstItem.finalItemNode?.getComponent(Sprite);
+        const secondFinalSprite = secondItem.finalItemNode?.getComponent(Sprite);
+        return firstFinalSprite?.spriteFrame ?? secondFinalSprite?.spriteFrame ?? null;
     }
 }

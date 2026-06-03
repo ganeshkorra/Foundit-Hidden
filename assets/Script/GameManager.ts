@@ -1,7 +1,7 @@
 // FILE: GameManager.ts (Final Version with 3-Second Hold)
 
-import { _decorator, Component, Node, director, ProgressBar, Label, Button, tween, Vec3, UIOpacity, SpriteFrame, Sprite, UITransform, v3, Tween, AudioSource } from 'cc';
-import { CollectibleCoin, COLLECT_COIN_EVENT } from './CollectibleCoin';
+import { _decorator, Component, Node, director, ProgressBar, Label, Button, tween, Vec3, UIOpacity, SpriteFrame, Sprite, UITransform, v3, Tween, AudioSource, Graphics, Color, EventTouch } from 'cc';
+import { CollectibleCoin, COLLECT_COIN_EVENT, ITEM_TAPPED_EVENT } from './CollectibleCoin';
 import { CollectionContainer, CONTAINER_COMPLETE_EVENT } from './CollectionContainer';
 
 declare const mraid: any;
@@ -60,6 +60,24 @@ export class GameManager extends Component {
     public luckLevelLabel: Label | null = null;
     @property({ type: ProgressBar, tooltip: "The progress bar for the luck level." })
     public luckLevelProgressBar: ProgressBar | null = null;
+    @property({ type: Node, tooltip: "Fake node placed between the mother's eyes for crying tears." })
+    public parentCryAnchor: Node | null = null;
+    @property({ type: Node, tooltip: "Fake node placed between the child's eyes for crying tears." })
+    public childCryAnchor: Node | null = null;
+    @property({ type: Node, tooltip: "The actual mother sprite node to shake while crying." })
+    public motherCryNode: Node | null = null;
+    @property({ type: Node, tooltip: "The actual child sprite node to shake while crying." })
+    public childCryNode: Node | null = null;
+    @property({ type: Node, tooltip: "Large gameplay node that can be dragged to reveal off-screen collectibles. Defaults to Canvas/BG." })
+    public panRoot: Node | null = null;
+    @property({ type: Boolean, tooltip: "Allow player to drag the gameplay area." })
+    public enableScreenPan: boolean = true;
+    @property({ type: Number, tooltip: "Extra pan space beyond the calculated content bounds." })
+    public panPadding: number = 40;
+    @property({ type: Number, tooltip: "Lower values make drag panning slower." })
+    public panDragSensitivity: number = 0.45;
+    @property({ type: Number, tooltip: "Higher values make the pan catch up faster." })
+    public panFollowSpeed: number = 10;
 
 
     private isGameStarted: boolean = false;
@@ -72,29 +90,55 @@ export class GameManager extends Component {
     private handTween: Tween<Node> | null = null;
     private coinTween: Tween<Node> | null = null;
     private glowTween: Tween<Node> | null = null;
+    private pairPulseTween: Tween<Node> | null = null;
+    private pairPulseTarget: CollectibleCoin | null = null;
+    private pairPulseBaseScale: Vec3 | null = null;
     private isHintActive: boolean = false;
     private totalCoinsCollected: number = 0;
     private isHintInstructionVisible: boolean = false;
     private totalCollectibleCount: number = 0;
     private currentCollectibleCount: number = 0;
+    private panStartPosition: Vec3 = new Vec3();
+    private panTargetPosition: Vec3 = new Vec3();
     
-    onLoad() { this.setupEventListeners(); this.resetGame(); }
+    onLoad() { this.setupPanRoot(); this.setupEventListeners(); this.createSadReactionEffects(); this.resetGame(); }
     onDestroy() { this.cleanupEventListeners(); }
-    update(deltaTime: number) { if (!this.isGameStarted || this.isGameOver) return; this.updateGameTimer(deltaTime); this.updateIdleTimer(deltaTime); }
-    private setupEventListeners() { director.on(COLLECT_COIN_EVENT, this.onAnyCoinClicked, this); }
-    private cleanupEventListeners() { director.off(COLLECT_COIN_EVENT, this.onAnyCoinClicked, this); }
+    update(deltaTime: number) { this.updateSmoothPan(deltaTime); if (!this.isGameStarted || this.isGameOver) return; this.updateGameTimer(deltaTime); this.updateIdleTimer(deltaTime); }
+    private setupEventListeners() {
+        director.on(ITEM_TAPPED_EVENT, this.onAnyItemTapped, this);
+        director.on(COLLECT_COIN_EVENT, this.onAnyItemCollected, this);
+        this.panRoot?.on(Node.EventType.TOUCH_MOVE, this.onPanTouchMove, this);
+    }
 
-    private onAnyCoinClicked(coinNode: Node) { 
+    private cleanupEventListeners() {
+        director.off(ITEM_TAPPED_EVENT, this.onAnyItemTapped, this);
+        director.off(COLLECT_COIN_EVENT, this.onAnyItemCollected, this);
+        this.panRoot?.off(Node.EventType.TOUCH_MOVE, this.onPanTouchMove, this);
+    }
+
+    private onAnyItemTapped(item?: CollectibleCoin) {
         if (this.isGameOver) return; 
         if (this.tapSound) { this.tapSound.play(); } 
-        if (!this.isGameStarted) { this.startGame(); } 
-        else { this.stopTutorial(); } 
+        if (!this.isGameStarted) {
+            this.startGame(item);
+        } else {
+            this.stopTutorial();
+            this.scheduleOnce(() => this.updatePairPulseForSelection(item), 0);
+        }
         
         this.idleTimer = 0; 
-        const index = this.uncollectedCoins.indexOf(coinNode); 
-        if (index > -1) { 
-            this.uncollectedCoins.splice(index, 1); 
-        } 
+    }
+
+    private onAnyItemCollected(coinNode: Node, _spriteFrame: SpriteFrame, _worldPos: Vec3, sourceNodes: Node[] = []) { 
+        if (this.isGameOver) return; 
+
+        const collectedNodes = sourceNodes.length > 0 ? sourceNodes : [coinNode];
+        collectedNodes.forEach(node => {
+            const index = this.uncollectedCoins.indexOf(node); 
+            if (index > -1) { 
+                this.uncollectedCoins.splice(index, 1); 
+            }
+        });
         
         this.currentCollectibleCount++;
         this.updateMainProgressBar();
@@ -111,9 +155,12 @@ export class GameManager extends Component {
          this.completedContainers++; 
     }
     
-    private startGame() {
+    private startGame(firstTappedItem?: CollectibleCoin) {
         this.isGameStarted = true;
-        this.stopTutorial();
+        const shouldGuidePair = this.tryShowPairTutorial(firstTappedItem);
+        if (!shouldGuidePair) {
+            this.stopTutorial();
+        }
         this.hideInstructionText();
         if (this.backgroundMusic) {
             this.backgroundMusic.play();
@@ -240,6 +287,11 @@ export class GameManager extends Component {
         if (this.tutorialHintGlow) { this.tutorialHintGlow.active = false; } 
         if (this.tutorialHintCoin) { this.tutorialHintCoin.active = false; }
         if (this.luckLevelPanel) { this.luckLevelPanel.active = false; }
+        if (this.panRoot) {
+            tween(this.panRoot).stop();
+            this.panRoot.setPosition(this.panStartPosition);
+            this.panTargetPosition.set(this.panStartPosition);
+        }
         
         this.isGameStarted = false; this.isGameOver = false; this.isHintActive = false;
         this.totalCoinsCollected = 0; this.currentTime = this.gameDuration; 
@@ -258,7 +310,7 @@ export class GameManager extends Component {
             if (button) button.interactable = true;
         });
 
-        this.totalCollectibleCount = this.allCollectibleItems.length;
+        this.totalCollectibleCount = this.getTotalCollectionGoalCount();
         this.currentCollectibleCount = 0;
         this.updateMainProgressBar();
         
@@ -293,13 +345,294 @@ export class GameManager extends Component {
             this.playTapTutorial(this.tutorialTargetCoin, true); 
         } 
     }
+
+    private tryShowPairTutorial(firstTappedItem?: CollectibleCoin) {
+        if (!firstTappedItem || firstTappedItem.node !== this.tutorialTargetCoin) {
+            return false;
+        }
+
+        const pairItem = this.findPairItem(firstTappedItem);
+        if (!pairItem) {
+            return false;
+        }
+
+        this.focusPanOnPair(firstTappedItem.node, pairItem.node, true);
+        this.playPairPulse(pairItem);
+        this.playTapTutorial(pairItem.node, false);
+        return true;
+    }
+
+    private findPairItem(item: CollectibleCoin) {
+        const pairId = item.getPairId();
+        if (!pairId) return null;
+
+        const pairNode = this.allCollectibleItems.find(itemNode => {
+            if (!itemNode?.isValid || itemNode === item.node) return false;
+            const collectible = itemNode.getComponent(CollectibleCoin);
+            return !!collectible && !collectible.isAlreadyCollected() && collectible.getPairId() === pairId;
+        }) ?? null;
+
+        return pairNode?.getComponent(CollectibleCoin) ?? null;
+    }
+
+    private createSadReactionEffects() {
+        const canvas = this.node.scene?.getChildByName('Canvas');
+        const bgNode = canvas?.getChildByName('BG');
+        if (!bgNode || bgNode.getChildByName('SadReactionEffects')) return;
+
+        const effectsRoot = new Node('SadReactionEffects');
+        bgNode.addChild(effectsRoot);
+        effectsRoot.setPosition(Vec3.ZERO);
+
+        const parentCenter = this.getEffectPosition(this.parentCryAnchor, effectsRoot, new Vec3(1960 - 1920, 1080 - 582, 0));
+        const childCenter = this.getEffectPosition(this.childCryAnchor, effectsRoot, new Vec3(1444 - 1920, 1080 - 704, 0));
+
+        this.createParentCryingEffect(effectsRoot, parentCenter);
+        this.createChildSprinkleCryingEffect(effectsRoot, childCenter);
+        this.createChildIrritationMark(effectsRoot, new Vec3(childCenter.x + 70, childCenter.y + 120, 0));
+        this.startCryingShake(this.motherCryNode ?? bgNode.getChildByName('Mother'), 7, 1.5, 0);
+        this.startCryingShake(this.childCryNode ?? bgNode.getChildByName('Child'), 10, 2.2, 0.12);
+    }
+
+    private getEffectPosition(anchorNode: Node | null, targetParent: Node, fallbackPosition: Vec3) {
+        if (!anchorNode?.isValid) return fallbackPosition;
+
+        const parentTransform = targetParent.getComponent(UITransform) ?? targetParent.addComponent(UITransform);
+        if (!parentTransform) return fallbackPosition;
+
+        return parentTransform.convertToNodeSpaceAR(anchorNode.worldPosition);
+    }
+
+    private createParentCryingEffect(parent: Node, centerPosition: Vec3) {
+        const leftEye = new Vec3(centerPosition.x - 40, centerPosition.y + 5, 0);
+        const rightEye = new Vec3(centerPosition.x + 40, centerPosition.y + 3, 0);
+        const groundY = centerPosition.y - 390;
+        this.createCryingEffect(parent, leftEye, rightEye, groundY, 0);
+    }
+
+    private createCryingEffect(parent: Node, leftEyePosition: Vec3, rightEyePosition: Vec3, groundY: number, delay: number) {
+        // this.createFaceTear(parent, leftEyePosition, delay, 1.15);
+        // this.createFaceTear(parent, rightEyePosition, delay + 1, 1.15);
+        this.createTearStream(parent, leftEyePosition , groundY, delay, 1);
+        this.createTearStream(parent, rightEyePosition, groundY, delay + 1, 1);
+    }
+
+    // private createFaceTear(parent: Node, eyePosition: Vec3, delay: number, sizeMultiplier: number = 1) {
+    //     const tearNode = new Node('FaceTearStream');
+    //     parent.addChild(tearNode);
+    //     tearNode.setPosition(eyePosition);
+    //     tearNode.addComponent(UITransform).setContentSize(40, 90);
+
+    //     const opacity = tearNode.addComponent(UIOpacity);
+    //     opacity.opacity = 210;
+
+    //     const graphics = tearNode.addComponent(Graphics);
+    //     graphics.fillColor = new Color(40, 180, 255, 230);
+    //     graphics.strokeColor = new Color(10, 110, 210, 235);
+    //     graphics.lineWidth = 3;
+    //     graphics.roundRect(-8 * sizeMultiplier, -58 * sizeMultiplier, 16 * sizeMultiplier, 62 * sizeMultiplier, 8 * sizeMultiplier);
+    //     graphics.fill();
+    //     graphics.stroke();
+
+    //     graphics.fillColor = new Color(175, 235, 255, 210);
+    //     graphics.roundRect(-3 * sizeMultiplier, -52 * sizeMultiplier, 4 * sizeMultiplier, 46 * sizeMultiplier, 2 * sizeMultiplier);
+    //     graphics.fill();
+
+    //     tween(tearNode)
+    //         .delay(delay)
+    //         .to(0.45, { scale: new Vec3(1, 1.18, 1) }, { easing: 'sineInOut' })
+    //         .to(0.45, { scale: Vec3.ONE }, { easing: 'sineInOut' })
+    //         .union()
+    //         .repeatForever()
+    //         .start();
+
+    //     tween(opacity)
+    //         .delay(delay)
+    //         .to(0.45, { opacity: 255 }, { easing: 'sineInOut' })
+    //         .to(0.45, { opacity: 175 }, { easing: 'sineInOut' })
+    //         .union()
+    //         .repeatForever()
+    //         .start();
+    // }
+
+    private createTearStream(parent: Node, startPosition: Vec3, groundY: number, delay: number, sizeMultiplier: number = 1) {
+        for (let i = 0; i < 4; i++) {
+            const tearNode = new Node('FallingTearDrop');
+            parent.addChild(tearNode);
+            tearNode.setPosition(startPosition);
+            tearNode.addComponent(UITransform).setContentSize(60, 80);
+
+            const opacity = tearNode.addComponent(UIOpacity);
+            opacity.opacity = 0;
+
+            const graphics = tearNode.addComponent(Graphics);
+            graphics.fillColor = new Color(45, 180, 255, 245);
+            graphics.strokeColor = new Color(12, 100, 205, 230);
+            graphics.lineWidth = 4;
+            graphics.moveTo(0, 22 * sizeMultiplier);
+            graphics.bezierCurveTo(20 * sizeMultiplier, 4 * sizeMultiplier, 17 * sizeMultiplier, -24 * sizeMultiplier, 0, -28 * sizeMultiplier);
+            graphics.bezierCurveTo(-17 * sizeMultiplier, -24 * sizeMultiplier, -20 * sizeMultiplier, 4 * sizeMultiplier, 0, 22 * sizeMultiplier);
+            graphics.fill();
+            graphics.stroke();
+
+            graphics.fillColor = new Color(210, 245, 255, 220);
+            graphics.ellipse(-5 * sizeMultiplier, 5 * sizeMultiplier, 4 * sizeMultiplier, 10 * sizeMultiplier);
+            graphics.fill();
+
+            const streamDelay = delay + i * 0.24;
+            const driftX = i % 2 === 0 ? -18 : 16;
+            tween(tearNode)
+                .delay(streamDelay)
+                .call(() => {
+                    tearNode.setPosition(startPosition);
+                    tearNode.setScale(new Vec3(0.45, 0.45, 1));
+                    opacity.opacity = 0;
+                })
+                .call(() => {
+                    tween(opacity)
+                        .to(0.12, { opacity: 255 })
+                        .delay(0.52)
+                        .to(0.18, { opacity: 0 })
+                        .start();
+                })
+                .to(0.82, {
+                    position: new Vec3(startPosition.x + driftX, groundY, 0),
+                    scale: new Vec3(0.9, 0.9, 1)
+                }, { easing: 'quadIn' })
+                .call(() => {
+                    opacity.opacity = 0;
+                })
+                .delay(0.1)
+                .union()
+                .repeatForever()
+                .start();
+        }
+    }
+
+    private createChildSprinkleCryingEffect(parent: Node, centerPosition: Vec3) {
+        const leftEye = new Vec3(centerPosition.x - 36, centerPosition.y + 4, 0);
+        const rightEye = new Vec3(centerPosition.x + 36, centerPosition.y + 4, 0);
+
+        // this.createFaceTear(parent, leftEye, 0.1, 0.8);
+        // this.createFaceTear(parent, rightEye, 0.35, 0.8);
+        this.createSideSprinkleTears(parent, leftEye, -1, 0);
+        this.createSideSprinkleTears(parent, rightEye, 1, 0.2);
+    }
+
+    private createSideSprinkleTears(parent: Node, eyePosition: Vec3, direction: number, delay: number) {
+        for (let i = 0; i < 5; i++) {
+            const dropNode = new Node('ChildSprinkleTear');
+            parent.addChild(dropNode);
+            dropNode.setPosition(eyePosition);
+            dropNode.addComponent(UITransform).setContentSize(44, 32);
+
+            const opacity = dropNode.addComponent(UIOpacity);
+            opacity.opacity = 0;
+
+            const graphics = dropNode.addComponent(Graphics);
+            graphics.fillColor = new Color(75, 195, 255, 245);
+            graphics.strokeColor = new Color(20, 120, 210, 220);
+            graphics.lineWidth = 3;
+            graphics.ellipse(0, 0, 15, 7);
+            graphics.fill();
+            graphics.stroke();
+
+            const splashDelay = delay + i * 0.12;
+            const endX = eyePosition.x + direction * (90 + i * 12);
+            const endY = eyePosition.y + 32 - i * 14;
+
+            tween(dropNode)
+                .delay(splashDelay)
+                .call(() => {
+                    dropNode.setPosition(eyePosition);
+                    dropNode.setScale(new Vec3(0.35, 0.35, 1));
+                    opacity.opacity = 255;
+                })
+                .to(0.34, {
+                    position: new Vec3(endX, endY, 0),
+                    scale: new Vec3(0.9, 0.9, 1)
+                }, { easing: 'quadOut' })
+                .call(() => {
+                    opacity.opacity = 0;
+                })
+                .delay(0.35)
+                .union()
+                .repeatForever()
+                .start();
+        }
+    }
+
+    private createChildIrritationMark(parent: Node, position: Vec3) {
+        const markNode = new Node('ChildIrritationMark');
+        parent.addChild(markNode);
+        markNode.setPosition(position);
+        markNode.addComponent(UITransform).setContentSize(100, 90);
+
+        const graphics = markNode.addComponent(Graphics);
+        graphics.strokeColor = new Color(230, 35, 35, 255);
+        graphics.lineWidth = 9;
+        graphics.moveTo(-30, 12);
+        graphics.lineTo(-58, 36);
+        graphics.lineTo(-25, 31);
+        graphics.moveTo(4, 24);
+        graphics.lineTo(10, 58);
+        graphics.lineTo(26, 28);
+        graphics.moveTo(28, 6);
+        graphics.lineTo(62, 18);
+        graphics.lineTo(38, -4);
+        graphics.stroke();
+
+        tween(markNode)
+            .to(0.28, { scale: new Vec3(1.12, 1.12, 1) }, { easing: 'sineOut' })
+            .to(0.28, { scale: Vec3.ONE }, { easing: 'sineIn' })
+            .union()
+            .repeatForever()
+            .start();
+    }
+
+    private startCryingShake(targetNode: Node | null, moveAmount: number, rotationAmount: number, delay: number) {
+        if (!targetNode?.isValid) return;
+
+        const basePosition = targetNode.position.clone();
+        const baseRotation = targetNode.eulerAngles.clone();
+        tween(targetNode).stop();
+        targetNode.setPosition(basePosition);
+        targetNode.setRotationFromEuler(baseRotation);
+
+        tween(targetNode)
+            .delay(delay)
+            .to(0.08, {
+                position: new Vec3(basePosition.x - moveAmount, basePosition.y, basePosition.z),
+                eulerAngles: new Vec3(baseRotation.x, baseRotation.y, baseRotation.z - rotationAmount)
+            }, { easing: 'sineOut' })
+            .to(0.08, {
+                position: new Vec3(basePosition.x + moveAmount, basePosition.y, basePosition.z),
+                eulerAngles: new Vec3(baseRotation.x, baseRotation.y, baseRotation.z + rotationAmount)
+            }, { easing: 'sineInOut' })
+            .to(0.08, {
+                position: new Vec3(basePosition.x - moveAmount * 0.55, basePosition.y, basePosition.z),
+                eulerAngles: new Vec3(baseRotation.x, baseRotation.y, baseRotation.z - rotationAmount * 0.6)
+            }, { easing: 'sineInOut' })
+            .to(0.08, {
+                position: basePosition,
+                eulerAngles: baseRotation
+            }, { easing: 'sineOut' })
+            .delay(0.18)
+            .union()
+            .repeatForever()
+            .start();
+    }
     
     private playTapTutorial(targetNode: Node, showInstruction: boolean) {
         if (!this.highlightOverlay || !this.tutorialHintGlow || !this.tutorialHintCoin || !targetNode?.isValid) { return; }
+        if (this.handTween) { this.handTween.stop(); this.handTween = null; }
+        if (this.coinTween) { this.coinTween.stop(); this.coinTween = null; }
+        if (this.glowTween) { this.glowTween.stop(); this.glowTween = null; }
         
         this.highlightOverlay.active = true;
         const overlayOpacity = this.highlightOverlay.getComponent(UIOpacity);
         if (overlayOpacity) {
+            tween(overlayOpacity).stop();
             overlayOpacity.opacity = 0;
             tween(overlayOpacity).to(0.4, { opacity: 200 }).start();
         }
@@ -324,7 +657,7 @@ export class GameManager extends Component {
 
         if (this.coinTween) { this.coinTween.stop(); }
         this.coinTween = tween(this.tutorialHintCoin)
-            .to(0, { scale: new Vec3(0.45, 0.45, 1) },)
+            .to(0, { scale: new Vec3(0.55, 0.55, 1) },)
             .union().repeatForever().start();
 
         if (this.glowTween) { this.glowTween.stop(); }
@@ -386,6 +719,7 @@ export class GameManager extends Component {
         if (this.handTween) { this.handTween.stop(); this.handTween = null; }
         if (this.coinTween) { this.coinTween.stop(); this.coinTween = null; }
         if (this.glowTween) { this.glowTween.stop(); this.glowTween = null; }
+        this.stopPairPulse();
 
         if (this.handNode) { this.handNode.active = false; }
         if (this.tutorialHintCoin) { this.tutorialHintCoin.active = false; }
@@ -426,4 +760,169 @@ export class GameManager extends Component {
     }
     
     private getUIPosition(targetNode: Node): Vec3 | null { const referenceNode = this.handNode?.parent; if (!referenceNode || !targetNode.isValid) return null; const refUIT = referenceNode.getComponent(UITransform); if (!refUIT) return null; const worldPos = targetNode.getComponent(UITransform)!.convertToWorldSpaceAR(v3(0, 0, 0)); return refUIT.convertToNodeSpaceAR(worldPos); }
+
+    private setupPanRoot() {
+        if (!this.panRoot) {
+            this.panRoot = this.node.scene?.getChildByName('Canvas')?.getChildByName('BG') ?? null;
+        }
+
+        if (this.panRoot) {
+            this.panStartPosition.set(this.panRoot.position);
+            this.panTargetPosition.set(this.panRoot.position);
+        }
+    }
+
+    private onPanTouchMove(event: EventTouch) {
+        if (!this.enableScreenPan || this.isGameOver || !this.panRoot) return;
+
+        const delta = event.getUIDelta();
+        const nextPosition = this.panTargetPosition.clone();
+        nextPosition.x += delta.x * this.panDragSensitivity;
+        nextPosition.y += delta.y * this.panDragSensitivity;
+        this.panTargetPosition.set(this.getClampedPanPosition(nextPosition));
+    }
+
+    private updateSmoothPan(deltaTime: number) {
+        if (!this.panRoot) return;
+        const followAmount = this.clamp(deltaTime * this.panFollowSpeed, 0, 1);
+        const nextPosition = new Vec3();
+        Vec3.lerp(nextPosition, this.panRoot.position, this.panTargetPosition, followAmount);
+        this.panRoot.setPosition(this.getClampedPanPosition(nextPosition));
+    }
+
+    private focusPanOnPair(firstNode: Node, secondNode: Node, immediate: boolean = false) {
+        if (!this.enableScreenPan || !this.panRoot || !firstNode?.isValid || !secondNode?.isValid) return;
+
+        const firstPosition = this.getNodePositionInPanParent(firstNode);
+        const secondPosition = this.getNodePositionInPanParent(secondNode);
+        if (!firstPosition || !secondPosition) return;
+
+        const midpoint = new Vec3(
+            (firstPosition.x + secondPosition.x) * 0.5,
+            (firstPosition.y + secondPosition.y) * 0.5,
+            0
+        );
+        const desiredPosition = this.panRoot.position.clone();
+        desiredPosition.x -= midpoint.x;
+        desiredPosition.y -= midpoint.y;
+
+        this.panTargetPosition.set(this.getClampedPanPosition(desiredPosition));
+        if (immediate) {
+            tween(this.panRoot).stop();
+            this.panRoot.setPosition(this.panTargetPosition);
+        }
+    }
+
+    private getNodePositionInPanParent(targetNode: Node) {
+        if (!this.panRoot?.parent || !targetNode?.isValid) return null;
+        const canvas = this.node.scene?.getChildByName('Canvas');
+        const canvasTransform = canvas?.getComponent(UITransform);
+        if (!canvasTransform || !this.panRoot.parent) return;
+
+        const targetCanvasPosition = canvasTransform.convertToNodeSpaceAR(targetNode.worldPosition);
+        const panRootParentCanvasPosition = canvasTransform.convertToNodeSpaceAR(this.panRoot.parent!.worldPosition);
+        return new Vec3(
+            targetCanvasPosition.x - panRootParentCanvasPosition.x,
+            targetCanvasPosition.y - panRootParentCanvasPosition.y,
+            0
+        );
+    }
+
+    private getClampedPanPosition(position: Vec3) {
+        if (!this.panRoot) return position;
+
+        const canvas = this.node.scene?.getChildByName('Canvas');
+        const canvasTransform = canvas?.getComponent(UITransform);
+        const panTransform = this.panRoot.getComponent(UITransform);
+        if (!canvasTransform || !panTransform) return position;
+
+        const scaledWidth = panTransform.contentSize.width * Math.abs(this.panRoot.scale.x);
+        const scaledHeight = panTransform.contentSize.height * Math.abs(this.panRoot.scale.y);
+        const viewWidth = canvasTransform.contentSize.width;
+        const viewHeight = canvasTransform.contentSize.height;
+        const maxX = Math.max(0, (scaledWidth - viewWidth) * 0.5 + this.panPadding);
+        const maxY = Math.max(0, (scaledHeight - viewHeight) * 0.5 + this.panPadding);
+
+        return new Vec3(
+            this.clamp(position.x, this.panStartPosition.x - maxX, this.panStartPosition.x + maxX),
+            this.clamp(position.y, this.panStartPosition.y - maxY, this.panStartPosition.y + maxY),
+            position.z
+        );
+    }
+
+    private playPairPulse(pairItem: CollectibleCoin) {
+        this.stopPairPulse();
+        if (!pairItem.node?.isValid || pairItem.isAlreadyCollected()) return;
+
+        this.pairPulseTarget = pairItem;
+        const baseScale = pairItem.node.scale.clone();
+        this.pairPulseBaseScale = baseScale;
+        const pulseScale = new Vec3(baseScale.x * 1.08, baseScale.y * 1.08, baseScale.z);
+        this.pairPulseTween = tween(pairItem.node)
+            .to(0.45, { scale: pulseScale }, { easing: 'sineInOut' })
+            .to(0.45, { scale: baseScale }, { easing: 'sineInOut' })
+            .union()
+            .repeatForever()
+            .start();
+    }
+
+    private stopPairPulse() {
+        if (this.pairPulseTween) {
+            this.pairPulseTween.stop();
+            this.pairPulseTween = null;
+        }
+
+        if (this.pairPulseTarget?.node?.isValid && !this.pairPulseTarget.isAlreadyCollected() && this.pairPulseBaseScale) {
+            this.pairPulseTarget.node.setScale(this.pairPulseBaseScale);
+        }
+        this.pairPulseTarget = null;
+        this.pairPulseBaseScale = null;
+    }
+
+    private updatePairPulseForSelection(tappedItem?: CollectibleCoin) {
+        if (!tappedItem?.node?.isValid || tappedItem.isAlreadyCollected()) {
+            this.stopPairPulse();
+            return;
+        }
+
+        if (!tappedItem.isWaitingForPair()) {
+            this.stopPairPulse();
+            return;
+        }
+
+        const pairItem = this.findPairItem(tappedItem);
+        if (!pairItem) {
+            this.stopPairPulse();
+            return;
+        }
+
+        this.focusPanOnPair(tappedItem.node, pairItem.node);
+        this.playPairPulse(pairItem);
+    }
+
+    private clamp(value: number, min: number, max: number) {
+        return Math.min(max, Math.max(min, value));
+    }
+
+    private getTotalCollectionGoalCount() {
+        const containerTotal = this.collectionContainers.reduce((total, container) => total + container.getCollectionGoalCount(), 0);
+        if (containerTotal > 0) {
+            return containerTotal;
+        }
+
+        const pairIds = new Set<string>();
+        let unpairedItems = 0;
+
+        this.allCollectibleItems.forEach(itemNode => {
+            const collectible = itemNode.getComponent(CollectibleCoin);
+            const pairId = collectible?.getPairId() ?? '';
+            if (pairId) {
+                pairIds.add(pairId);
+            } else {
+                unpairedItems++;
+            }
+        });
+
+        return pairIds.size + unpairedItems;
+    }
 }
