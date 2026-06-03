@@ -410,7 +410,7 @@
     "_prefab": null,
     "_lpos": {
       "__type__": "cc.Vec3",
-      "x": 0,
+      "x": -97.545,
       "y": -135.597,
       "z": 0
     },
@@ -4731,8 +4731,8 @@
     "_prefab": null,
     "_lpos": {
       "__type__": "cc.Vec3",
-      "x": -475.796,
-      "y": -842.682,
+      "x": -333.903,
+      "y": -468.946,
       "z": 0
     },
     "_lrot": {
@@ -6269,7 +6269,7 @@
       "__id__": 166
     },
     "_children": [],
-    "_active": false,
+    "_active": true,
     "_components": [
       {
         "__id__": 168
@@ -6427,7 +6427,7 @@
       "__id__": 166
     },
     "_children": [],
-    "_active": false,
+    "_active": true,
     "_components": [
       {
         "__id__": 173
@@ -6536,7 +6536,7 @@
       "__id__": 166
     },
     "_children": [],
-    "_active": false,
+    "_active": true,
     "_components": [
       {
         "__id__": 176
@@ -7082,7 +7082,7 @@
       "__id__": 2
     },
     "_children": [],
-    "_active": false,
+    "_active": true,
     "_components": [
       {
         "__id__": 192
@@ -7095,7 +7095,7 @@
     "_lpos": {
       "__type__": "cc.Vec3",
       "x": 0,
-      "y": 0,
+      "y": 316.869,
       "z": 0
     },
     "_lrot": {
@@ -7133,8 +7133,8 @@
     "__prefab": null,
     "_contentSize": {
       "__type__": "cc.Size",
-      "width": 488.8685302734375,
-      "height": 185.98599999999996
+      "width": 535.6940307617188,
+      "height": 262.08599999999996
     },
     "_anchorPoint": {
       "__type__": "cc.Vec2",
@@ -7158,12 +7158,12 @@
     "_dstBlendFactor": 4,
     "_color": {
       "__type__": "cc.Color",
-      "r": 250,
-      "g": 226,
-      "b": 93,
+      "r": 255,
+      "g": 255,
+      "b": 255,
       "a": 255
     },
-    "_string": "FIND ALL ITEMS\nTO GET LUCKY!",
+    "_string": "FIND ALL HIDDEN\nITEMS\n",
     "_horizontalAlign": 1,
     "_verticalAlign": 1,
     "_actualFontSize": 60.2,
@@ -7550,7 +7550,7 @@
       "__id__": 260
     },
     "gameDuration": 70,
-    "hintInterval": 5,
+    "hintInterval": 12,
     "highlightOverlay": {
       "__id__": 167
     },
@@ -7560,12 +7560,8 @@
     "tutorialHintCoin": {
       "__id__": 175
     },
-    "luckLevelPanel": {
-      "__id__": 207
-    },
-    "luckLevelLabel": {
-      "__id__": 216
-    },
+    "luckLevelPanel": null,
+    "luckLevelLabel": null,
     "luckLevelProgressBar": {
       "__id__": 226
     },
@@ -7581,9 +7577,14 @@
     "childCryNode": {
       "__id__": 9
     },
-    "panRoot": null,
+    "panRoot": {
+      "__id__": 8
+    },
     "enableScreenPan": true,
     "panPadding": 40,
+    "panDragSensitivity": 1,
+    "panFollowSpeed": 3,
+    "openingPairHandDelay": 0.01,
     "_id": "96/Att6zZDuqNbF494SIi1"
   },
   {
@@ -7663,7 +7664,7 @@
         "__id__": 203
       }
     ],
-    "_active": false,
+    "_active": true,
     "_components": [
       {
         "__id__": 237
@@ -7824,7 +7825,7 @@
         "__id__": 227
       }
     ],
-    "_active": true,
+    "_active": false,
     "_components": [
       {
         "__id__": 233
@@ -8611,7 +8612,7 @@
         "__id__": 228
       }
     ],
-    "_active": false,
+    "_active": true,
     "_components": [
       {
         "__id__": 231

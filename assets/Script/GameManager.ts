@@ -77,7 +77,9 @@ export class GameManager extends Component {
     @property({ type: Number, tooltip: "Lower values make drag panning slower." })
     public panDragSensitivity: number = 0.45;
     @property({ type: Number, tooltip: "Higher values make the pan catch up faster." })
-    public panFollowSpeed: number = 10;
+    public panFollowSpeed: number = 3;
+    @property({ type: Number, tooltip: "Delay after opening pair pan settles before showing the hand." })
+    public openingPairHandDelay: number = 0.01;
 
 
     private isGameStarted: boolean = false;
@@ -100,6 +102,7 @@ export class GameManager extends Component {
     private currentCollectibleCount: number = 0;
     private panStartPosition: Vec3 = new Vec3();
     private panTargetPosition: Vec3 = new Vec3();
+    private openingPairTutorialId: number = 0;
     
     onLoad() { this.setupPanRoot(); this.setupEventListeners(); this.createSadReactionEffects(); this.resetGame(); }
     onDestroy() { this.cleanupEventListeners(); }
@@ -356,9 +359,10 @@ export class GameManager extends Component {
             return false;
         }
 
-        this.focusPanOnPair(firstTappedItem.node, pairItem.node, true);
+        this.stopTutorial();
+        this.focusPanOnPair(firstTappedItem.node, pairItem.node);
         this.playPairPulse(pairItem);
-        this.playTapTutorial(pairItem.node, false);
+        this.showOpeningPairHandAfterPan(pairItem);
         return true;
     }
 
@@ -715,6 +719,7 @@ export class GameManager extends Component {
     }
     
     private stopTutorial() {
+        this.openingPairTutorialId++;
         this.isHintActive = false;
         if (this.handTween) { this.handTween.stop(); this.handTween = null; }
         if (this.coinTween) { this.coinTween.stop(); this.coinTween = null; }
@@ -761,6 +766,29 @@ export class GameManager extends Component {
     
     private getUIPosition(targetNode: Node): Vec3 | null { const referenceNode = this.handNode?.parent; if (!referenceNode || !targetNode.isValid) return null; const refUIT = referenceNode.getComponent(UITransform); if (!refUIT) return null; const worldPos = targetNode.getComponent(UITransform)!.convertToWorldSpaceAR(v3(0, 0, 0)); return refUIT.convertToNodeSpaceAR(worldPos); }
 
+    private playHandOnlyTutorial(targetNode: Node) {
+        if (!this.handNode || !targetNode?.isValid) return;
+
+        if (this.handTween) { this.handTween.stop(); this.handTween = null; }
+        if (this.coinTween) { this.coinTween.stop(); this.coinTween = null; }
+        if (this.glowTween) { this.glowTween.stop(); this.glowTween = null; }
+
+        if (this.highlightOverlay) {
+            this.highlightOverlay.active = true;
+            const overlayOpacity = this.highlightOverlay.getComponent(UIOpacity);
+            if (overlayOpacity) {
+                tween(overlayOpacity).stop();
+                overlayOpacity.opacity = 0;
+                tween(overlayOpacity).to(0.25, { opacity: 200 }).start();
+            }
+        }
+        if (this.tutorialHintCoin) { this.tutorialHintCoin.active = false; }
+        if (this.tutorialHintGlow) { this.tutorialHintGlow.active = false; }
+
+        this.handNode.active = true;
+        this.runTapAnimationLoop(targetNode);
+    }
+
     private setupPanRoot() {
         if (!this.panRoot) {
             this.panRoot = this.node.scene?.getChildByName('Canvas')?.getChildByName('BG') ?? null;
@@ -788,6 +816,29 @@ export class GameManager extends Component {
         const nextPosition = new Vec3();
         Vec3.lerp(nextPosition, this.panRoot.position, this.panTargetPosition, followAmount);
         this.panRoot.setPosition(this.getClampedPanPosition(nextPosition));
+    }
+
+    private showOpeningPairHandAfterPan(pairItem: CollectibleCoin) {
+        const tutorialId = ++this.openingPairTutorialId;
+        const waitForPan = () => {
+            if (tutorialId !== this.openingPairTutorialId || this.isGameOver || !this.panRoot || !pairItem.node?.isValid || pairItem.isAlreadyCollected()) {
+                return;
+            }
+
+            const remainingDistance = Vec3.distance(this.panRoot.position, this.panTargetPosition);
+            if (remainingDistance > 1) {
+                this.scheduleOnce(waitForPan, 0.01);
+                return;
+            }
+
+            this.scheduleOnce(() => {
+                if (tutorialId === this.openingPairTutorialId && !this.isGameOver && pairItem.node?.isValid && !pairItem.isAlreadyCollected()) {
+                    this.playHandOnlyTutorial(pairItem.node);
+                }
+            }, this.openingPairHandDelay);
+        };
+
+        waitForPan();
     }
 
     private focusPanOnPair(firstNode: Node, secondNode: Node, immediate: boolean = false) {
