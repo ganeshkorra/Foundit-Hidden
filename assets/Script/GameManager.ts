@@ -3,6 +3,7 @@
 import { _decorator, Component, Node, director, ProgressBar, Label, Button, tween, Vec3, UIOpacity, SpriteFrame, Sprite, UITransform, v3, Tween, AudioSource, Graphics, Color, EventTouch } from 'cc';
 import { CollectibleCoin, COLLECT_COIN_EVENT, ITEM_TAPPED_EVENT } from './CollectibleCoin';
 import { CollectionContainer, CONTAINER_COMPLETE_EVENT } from './CollectionContainer';
+import { Analytics, analyticsEvents } from './Analytics';
 
 declare const mraid: any;
 const { ccclass, property } = _decorator;
@@ -84,8 +85,8 @@ export class GameManager extends Component {
     public openingPairHandDelay: number = 0.01;
     @property({ type: Number, tooltip: "Show the first pair hand when pan is within this distance of the target." })
     public openingPairHandPanThreshold: number = 45;
-    @property({ type: Boolean, tooltip: "Print idle hint state changes to the console." })
-    public enableHintDebugLogs: boolean = true;
+    // @property({ type: Boolean, tooltip: "Print idle hint state changes to the console." })
+    // public enableHintDebugLogs: boolean = true;
 
 
     private isGameStarted: boolean = false;
@@ -117,14 +118,30 @@ export class GameManager extends Component {
     private happyLadyReactionId: number = 0;
     private sadReactionEffectsRoot: Node | null = null;
     private keepHappyLadyVisible: boolean = false;
+    private challengeStartEventFired: boolean = false;
+    private progressMilestones: Set<number> = new Set();
     
-    onLoad() { this.setupPanRoot(); this.setupEventListeners(); this.createSadReactionEffects(); this.resetGame(); }
+    onLoad() {
+        this.setupPanRoot();
+        this.setupEventListeners();
+        this.createSadReactionEffects();
+        this.resetGame();
+        // Defer analytics to next frame to ensure Analytics component is initialized
+        this.scheduleOnce(() => {
+            Analytics.instance?.dispatchEvent(analyticsEvents.DISPLAYED);
+        }, 0);
+    }
     onDestroy() { this.cleanupEventListeners(); }
     update(deltaTime: number) { this.updateSmoothPan(deltaTime); if (!this.isGameStarted || this.isGameOver) return; this.updateGameTimer(deltaTime); this.updateIdleTimer(deltaTime); }
     private setupEventListeners() {
         director.on(ITEM_TAPPED_EVENT, this.onAnyItemTapped, this);
         director.on(COLLECT_COIN_EVENT, this.onAnyItemCollected, this);
         this.panRoot?.on(Node.EventType.TOUCH_MOVE, this.onPanTouchMove, this);
+        
+        // Setup CTA button click handler for analytics
+        if (this.ctaButton) {
+            this.ctaButton.node.on(Button.EventType.CLICK, this.onCtaButtonClicked, this);
+        }
     }
 
     private cleanupEventListeners() {
@@ -159,6 +176,7 @@ export class GameManager extends Component {
         
         this.currentCollectibleCount++;
         this.updateMainProgressBar();
+        this.checkAndFireProgressMilestones();
         this.totalCoinsCollected++; 
         this.playHappyLadyReaction();
 
@@ -175,6 +193,13 @@ export class GameManager extends Component {
     
     private startGame(firstTappedItem?: CollectibleCoin) {
         this.isGameStarted = true;
+        
+        // Fire analytics: challenge has started
+        if (!this.challengeStartEventFired) {
+            Analytics.instance?.dispatchEvent(analyticsEvents.CHALLENGE_STARTED);
+            this.challengeStartEventFired = true;
+        }
+        
         const shouldGuidePair = this.tryShowPairTutorial(firstTappedItem);
         if (!shouldGuidePair) {
             this.stopTutorial();
@@ -188,7 +213,21 @@ export class GameManager extends Component {
     private endGame(didWin: boolean) {
         if (this.isGameOver) return;
         this.isGameOver = true;
-    
+
+        // Reset BG pan to original position
+        if (this.panRoot) {
+            tween(this.panRoot).stop();
+            this.panRoot.setPosition(this.panStartPosition);
+            this.panTargetPosition.set(this.panStartPosition);
+        }
+
+        // Fire analytics: challenge completed or failed
+        if (didWin) {
+            Analytics.instance?.dispatchEvent(analyticsEvents.CHALLENGE_SOLVED);
+        } else {
+            Analytics.instance?.dispatchEvent(analyticsEvents.CHALLENGE_FAILED);
+        }
+
         if (this.backgroundMusic) { this.backgroundMusic.stop(); }
         this.stopTutorial();
         this.allCollectibleItems.forEach(itemNode => { 
@@ -200,8 +239,15 @@ export class GameManager extends Component {
             this.showFinalHappyLadyState();
             this.showLuckLevelSequence();
         } else {
+            // Show sad lady before end screen
+            this.setSadMotherVisible(true);
             tween(this.node).delay(0.5).call(() => this.showEndScreen()).start();
         }
+        
+        // Fire CTA click event after 0.5 seconds
+        this.scheduleOnce(() => {
+            this.onCtaButtonClicked();
+        }, 1);
     }
 
     // --- MODIFIED FUNCTION WITH NEW TIMING ---
@@ -265,6 +311,9 @@ export class GameManager extends Component {
 
     private showEndScreen() {
         if (this.endScreenPanel) {
+            // Fire analytics: endcard is shown
+            Analytics.instance?.dispatchEvent(analyticsEvents.ENDCARD_SHOWN);
+            
             this.endScreenPanel.active = true;
             
             const panelOpacity = this.endScreenPanel.getComponent(UIOpacity);
@@ -315,6 +364,8 @@ export class GameManager extends Component {
         }
         
         this.isGameStarted = false; this.isGameOver = false; this.isHintActive = false; this.isHintPending = false;
+        this.challengeStartEventFired = false;
+        this.progressMilestones.clear();
         this.totalCoinsCollected = 0; this.currentTime = this.gameDuration; 
         
         this.completedContainers = 0; 
@@ -346,29 +397,29 @@ export class GameManager extends Component {
     private updateGameTimer(deltaTime: number) { if (this.isGameStarted) { this.currentTime -= deltaTime; } if (this.timerLabel) { const totalSeconds = Math.max(0, Math.ceil(this.currentTime)); const minutes = Math.floor(totalSeconds / 60); const seconds = totalSeconds % 60; const formattedMinutes = minutes < 10 ? '0' + minutes : minutes.toString(); const formattedSeconds = seconds < 10 ? '0' + seconds : seconds.toString(); this.timerLabel.string = `${formattedMinutes}:${formattedSeconds}`; } if (this.currentTime <= 0 && this.isGameStarted) { this.endGame(false); } }
     private updateIdleTimer(deltaTime: number) {
         if (this.isHintActive) {
-            this.logIdleStateOnce('blocked-active', { handActive: this.handNode?.active ?? false, idleTimer: this.idleTimer.toFixed(2) });
+            // this.logIdleStateOnce('blocked-active', { handActive: this.handNode?.active ?? false, idleTimer: this.idleTimer.toFixed(2) });
             return;
         }
 
         if (this.isHintPending) {
-            this.logIdleStateOnce('blocked-pending', { idleTimer: this.idleTimer.toFixed(2) });
+            // this.logIdleStateOnce('blocked-pending', { idleTimer: this.idleTimer.toFixed(2) });
             return;
         }
 
         if (this.uncollectedCoins.length === 0) {
-            this.logIdleStateOnce('blocked-empty', { idleTimer: this.idleTimer.toFixed(2) });
+            // this.logIdleStateOnce('blocked-empty', { idleTimer: this.idleTimer.toFixed(2) });
             return;
         }
 
         this.idleTimer += deltaTime;
-        this.logIdleProgress();
+        // this.logIdleProgress();
 
         if (this.idleTimer >= this.hintInterval) {
-            this.logHintDebug('trigger idle hint', {
-                idleTimer: this.idleTimer.toFixed(2),
-                hintInterval: this.hintInterval,
-                uncollected: this.uncollectedCoins.length,
-            });
+            // this.logHintDebug('trigger idle hint', {
+            //     idleTimer: this.idleTimer.toFixed(2),
+            //     hintInterval: this.hintInterval,
+            //     uncollected: this.uncollectedCoins.length,
+            // });
             this.triggerHint();
             this.idleTimer = 0;
             this.lastIdleDebugSecond = -1;
@@ -377,27 +428,27 @@ export class GameManager extends Component {
     
     private triggerHint() { 
         if (this.uncollectedCoins.length === 0) {
-            this.logHintDebug('trigger skipped: no uncollected coins');
+            // this.logHintDebug('trigger skipped: no uncollected coins');
             return;
         }
 
         const hintCoinNode = this.getSmartHintTarget();
         if (hintCoinNode && hintCoinNode.isValid) { 
             this.isHintPending = true;
-            this.logHintDebug('hint target selected', {
-                target: hintCoinNode.name,
-                targetPairId: hintCoinNode.getComponent(CollectibleCoin)?.getPairId() ?? '',
-                visible: this.isNodeOnCurrentScreen(hintCoinNode),
-            });
+            // this.logHintDebug('hint target selected', {
+            //     target: hintCoinNode.name,
+            //     targetPairId: hintCoinNode.getComponent(CollectibleCoin)?.getPairId() ?? '',
+            //     visible: this.isNodeOnCurrentScreen(hintCoinNode),
+            // });
             this.showIdleHintOnCurrentScreen(hintCoinNode);
             return;
         }
 
-        this.logHintDebug('trigger skipped: no valid smart target', {
-            liveItems: this.getLiveCollectibleItems().length,
-            visibleItems: this.getVisibleCollectibleItems(this.getLiveCollectibleItems()).length,
-            uncollected: this.uncollectedCoins.length,
-        });
+        // this.logHintDebug('trigger skipped: no valid smart target', {
+        //     liveItems: this.getLiveCollectibleItems().length,
+        //     visibleItems: this.getVisibleCollectibleItems(this.getLiveCollectibleItems()).length,
+        //     uncollected: this.uncollectedCoins.length,
+        // });
     }
 
     private getSmartHintTarget() {
@@ -406,7 +457,7 @@ export class GameManager extends Component {
 
         const visibleItems = this.getVisibleCollectibleItems(liveItems);
         if (visibleItems.length === 0) {
-            this.logHintDebug('no visible items for idle hint', { liveItems: liveItems.length });
+            // this.logHintDebug('no visible items for idle hint', { liveItems: liveItems.length });
             return null;
         }
 
@@ -483,35 +534,35 @@ export class GameManager extends Component {
         return pairs;
     }
 
-    private logIdleStateOnce(key: string, data?: Record<string, unknown>) {
-        if (this.lastIdleDebugKey === key) return;
-        this.lastIdleDebugKey = key;
-        this.logHintDebug(`idle ${key}`, data);
-    }
+    // private logIdleStateOnce(key: string, data?: Record<string, unknown>) {
+    //     if (this.lastIdleDebugKey === key) return;
+    //     this.lastIdleDebugKey = key;
+    //     this.logHintDebug(`idle ${key}`, data);
+    // }
 
-    private logIdleProgress() {
-        this.lastIdleDebugKey = 'counting';
-        if (!this.enableHintDebugLogs) return;
+    // private logIdleProgress() {
+    //     this.lastIdleDebugKey = 'counting';
+    //     // if (!this.enableHintDebugLogs) return;
 
-        const wholeSecond = Math.floor(this.idleTimer);
-        if (wholeSecond === this.lastIdleDebugSecond || wholeSecond % 5 !== 0) return;
+    //     const wholeSecond = Math.floor(this.idleTimer);
+    //     if (wholeSecond === this.lastIdleDebugSecond || wholeSecond % 5 !== 0) return;
 
-        this.lastIdleDebugSecond = wholeSecond;
-        console.log('[HintDebug] idle counting', {
-            idleTimer: this.idleTimer.toFixed(2),
-            hintInterval: this.hintInterval,
-            uncollected: this.uncollectedCoins.length,
-        });
-    }
+    //     this.lastIdleDebugSecond = wholeSecond;
+    //     console.log('[HintDebug] idle counting', {
+    //         idleTimer: this.idleTimer.toFixed(2),
+    //         hintInterval: this.hintInterval,
+    //         uncollected: this.uncollectedCoins.length,
+    //     });
+    // }
 
-    private logHintDebug(message: string, data?: Record<string, unknown>) {
-        if (!this.enableHintDebugLogs) return;
-        if (data) {
-            console.log(`[HintDebug] ${message}`, data);
-        } else {
-            console.log(`[HintDebug] ${message}`);
-        }
-    }
+    // private logHintDebug(message: string, data?: Record<string, unknown>) {
+    //     // if (!this.enableHintDebugLogs) return;
+    //     if (data) {
+    //         console.log(`[HintDebug] ${message}`, data);
+    //     } else {
+    //         console.log(`[HintDebug] ${message}`);
+    //     }
+    // }
 
     private hideInstructionText() { if (!this.instructionText) return; tween(this.instructionText).stop(); const opacityComp = this.instructionText.getComponent(UIOpacity); if (opacityComp) { tween(opacityComp).to(0.3, { opacity: 0 }, { easing: 'backIn' }).start(); } tween(this.instructionText).to(0.3, { scale: Vec3.ZERO }, { easing: 'backIn' }).call(() => { if (this.instructionText) this.instructionText.active = false; }).start(); }
     private updateMainProgressBar() {
@@ -575,6 +626,16 @@ export class GameManager extends Component {
         const effectsRoot = new Node('SadReactionEffects');
         bgNode.addChild(effectsRoot);
         effectsRoot.setPosition(Vec3.ZERO);
+        
+        // Position tears before TutorialLayer in the hierarchy
+        const tutorialLayer = bgNode.getChildByName('TutorialLayer');
+        if (tutorialLayer) {
+            const tutorialIndex = bgNode.children.indexOf(tutorialLayer);
+            if (tutorialIndex >= 0) {
+                effectsRoot.setSiblingIndex(tutorialIndex);
+            }
+        }
+        
         this.sadReactionEffectsRoot = effectsRoot;
 
         const parentCenter = this.getEffectPosition(this.parentCryAnchor, effectsRoot, new Vec3(1960 - 1920, 1080 - 582, 0));
@@ -1200,20 +1261,20 @@ export class GameManager extends Component {
         if (tutorialId !== this.openingPairTutorialId || this.isGameOver || !targetNode?.isValid || !this.isNodeOnCurrentScreen(targetNode)) {
             this.isHintPending = false;
             this.isHintActive = false;
-            this.logHintDebug('idle hand canceled: target not visible', {
-                target: targetNode?.name ?? '',
-                targetValid: targetNode?.isValid ?? false,
-                visible: this.isNodeOnCurrentScreen(targetNode),
-            });
+            // this.logHintDebug('idle hand canceled: target not visible', {
+            //     target: targetNode?.name ?? '',
+            //     targetValid: targetNode?.isValid ?? false,
+            //     visible: this.isNodeOnCurrentScreen(targetNode),
+            // });
             return;
         }
 
         this.isHintPending = false;
         this.isHintActive = true;
-        this.logHintDebug('show idle hand', {
-            target: targetNode.name,
-            visible: true,
-        });
+        // this.logHintDebug('show idle hand', {
+        //     target: targetNode.name,
+        //     visible: true,
+        // });
         this.playTapTutorial(targetNode, false);
     }
 
@@ -1376,5 +1437,30 @@ export class GameManager extends Component {
         });
 
         return pairIds.size + unpairedItems;
+    }
+    
+    private checkAndFireProgressMilestones() {
+        if (this.totalCollectibleCount <= 0) return;
+        
+        const progressPercent = Math.floor((this.currentCollectibleCount / this.totalCollectibleCount) * 100);
+        
+        // Fire event only once for each milestone
+        if (progressPercent >= 25 && !this.progressMilestones.has(25)) {
+            this.progressMilestones.add(25);
+            Analytics.instance?.dispatchEvent(analyticsEvents.CHALLENGE_PASS_25);
+        }
+        if (progressPercent >= 50 && !this.progressMilestones.has(50)) {
+            this.progressMilestones.add(50);
+            Analytics.instance?.dispatchEvent(analyticsEvents.CHALLENGE_PASS_50);
+        }
+        if (progressPercent >= 75 && !this.progressMilestones.has(75)) {
+            this.progressMilestones.add(75);
+            Analytics.instance?.dispatchEvent(analyticsEvents.CHALLENGE_PASS_75);
+        }
+    }
+    
+    private onCtaButtonClicked() {
+        // Fire analytics: call-to-action button was clicked
+        Analytics.instance?.dispatchEvent(analyticsEvents.CTA_CLICKED);
     }
 }
