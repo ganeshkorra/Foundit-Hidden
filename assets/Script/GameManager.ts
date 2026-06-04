@@ -66,6 +66,8 @@ export class GameManager extends Component {
     public childCryAnchor: Node | null = null;
     @property({ type: Node, tooltip: "The actual mother sprite node to shake while crying." })
     public motherCryNode: Node | null = null;
+    @property({ type: Node, tooltip: "Happy mother/lady sprite shown briefly after each successful collection." })
+    public happyLadyNode: Node | null = null;
     @property({ type: Node, tooltip: "The actual child sprite node to shake while crying." })
     public childCryNode: Node | null = null;
     @property({ type: Node, tooltip: "Large gameplay node that can be dragged to reveal off-screen collectibles. Defaults to Canvas/BG." })
@@ -80,6 +82,10 @@ export class GameManager extends Component {
     public panFollowSpeed: number = 3;
     @property({ type: Number, tooltip: "Delay after opening pair pan settles before showing the hand." })
     public openingPairHandDelay: number = 0.01;
+    @property({ type: Number, tooltip: "Show the first pair hand when pan is within this distance of the target." })
+    public openingPairHandPanThreshold: number = 45;
+    @property({ type: Boolean, tooltip: "Print idle hint state changes to the console." })
+    public enableHintDebugLogs: boolean = true;
 
 
     private isGameStarted: boolean = false;
@@ -96,6 +102,7 @@ export class GameManager extends Component {
     private pairPulseTarget: CollectibleCoin | null = null;
     private pairPulseBaseScale: Vec3 | null = null;
     private isHintActive: boolean = false;
+    private isHintPending: boolean = false;
     private totalCoinsCollected: number = 0;
     private isHintInstructionVisible: boolean = false;
     private totalCollectibleCount: number = 0;
@@ -103,6 +110,13 @@ export class GameManager extends Component {
     private panStartPosition: Vec3 = new Vec3();
     private panTargetPosition: Vec3 = new Vec3();
     private openingPairTutorialId: number = 0;
+    private nextHintPairIndex: number = 0;
+    private lastIdleDebugKey: string = '';
+    private lastIdleDebugSecond: number = -1;
+    private happyLadyBaseScale: Vec3 | null = null;
+    private happyLadyReactionId: number = 0;
+    private sadReactionEffectsRoot: Node | null = null;
+    private keepHappyLadyVisible: boolean = false;
     
     onLoad() { this.setupPanRoot(); this.setupEventListeners(); this.createSadReactionEffects(); this.resetGame(); }
     onDestroy() { this.cleanupEventListeners(); }
@@ -146,6 +160,7 @@ export class GameManager extends Component {
         this.currentCollectibleCount++;
         this.updateMainProgressBar();
         this.totalCoinsCollected++; 
+        this.playHappyLadyReaction();
 
         // Simplified win condition
         if (this.totalCoinsCollected >= this.totalCollectibleCount && this.totalCollectibleCount > 0) {
@@ -182,6 +197,7 @@ export class GameManager extends Component {
         });
 
         if (didWin) {
+            this.showFinalHappyLadyState();
             this.showLuckLevelSequence();
         } else {
             tween(this.node).delay(0.5).call(() => this.showEndScreen()).start();
@@ -290,13 +306,15 @@ export class GameManager extends Component {
         if (this.tutorialHintGlow) { this.tutorialHintGlow.active = false; } 
         if (this.tutorialHintCoin) { this.tutorialHintCoin.active = false; }
         if (this.luckLevelPanel) { this.luckLevelPanel.active = false; }
+        this.keepHappyLadyVisible = false;
+        this.resetHappyLadyReaction();
         if (this.panRoot) {
             tween(this.panRoot).stop();
             this.panRoot.setPosition(this.panStartPosition);
             this.panTargetPosition.set(this.panStartPosition);
         }
         
-        this.isGameStarted = false; this.isGameOver = false; this.isHintActive = false;
+        this.isGameStarted = false; this.isGameOver = false; this.isHintActive = false; this.isHintPending = false;
         this.totalCoinsCollected = 0; this.currentTime = this.gameDuration; 
         
         this.completedContainers = 0; 
@@ -318,21 +336,181 @@ export class GameManager extends Component {
         this.updateMainProgressBar();
         
         this.idleTimer = 0; 
+        this.nextHintPairIndex = 0;
+        this.lastIdleDebugKey = '';
+        this.lastIdleDebugSecond = -1;
         this.uncollectedCoins = [...this.allCollectibleItems];
         this.stopTutorial(); 
         this.scheduleOnce(() => { this.triggerTutorial(); }, 0);
     }
     private updateGameTimer(deltaTime: number) { if (this.isGameStarted) { this.currentTime -= deltaTime; } if (this.timerLabel) { const totalSeconds = Math.max(0, Math.ceil(this.currentTime)); const minutes = Math.floor(totalSeconds / 60); const seconds = totalSeconds % 60; const formattedMinutes = minutes < 10 ? '0' + minutes : minutes.toString(); const formattedSeconds = seconds < 10 ? '0' + seconds : seconds.toString(); this.timerLabel.string = `${formattedMinutes}:${formattedSeconds}`; } if (this.currentTime <= 0 && this.isGameStarted) { this.endGame(false); } }
-    private updateIdleTimer(deltaTime: number) { if (this.isHintActive || this.uncollectedCoins.length === 0) return; this.idleTimer += deltaTime; if (this.idleTimer >= this.hintInterval) { this.triggerHint(); this.idleTimer = 0; } }
+    private updateIdleTimer(deltaTime: number) {
+        if (this.isHintActive) {
+            this.logIdleStateOnce('blocked-active', { handActive: this.handNode?.active ?? false, idleTimer: this.idleTimer.toFixed(2) });
+            return;
+        }
+
+        if (this.isHintPending) {
+            this.logIdleStateOnce('blocked-pending', { idleTimer: this.idleTimer.toFixed(2) });
+            return;
+        }
+
+        if (this.uncollectedCoins.length === 0) {
+            this.logIdleStateOnce('blocked-empty', { idleTimer: this.idleTimer.toFixed(2) });
+            return;
+        }
+
+        this.idleTimer += deltaTime;
+        this.logIdleProgress();
+
+        if (this.idleTimer >= this.hintInterval) {
+            this.logHintDebug('trigger idle hint', {
+                idleTimer: this.idleTimer.toFixed(2),
+                hintInterval: this.hintInterval,
+                uncollected: this.uncollectedCoins.length,
+            });
+            this.triggerHint();
+            this.idleTimer = 0;
+            this.lastIdleDebugSecond = -1;
+        }
+    }
     
     private triggerHint() { 
-        if (this.uncollectedCoins.length === 0) return; 
-        const randomIndex = Math.floor(Math.random() * this.uncollectedCoins.length); 
-        const hintCoinNode = this.uncollectedCoins[randomIndex]; 
+        if (this.uncollectedCoins.length === 0) {
+            this.logHintDebug('trigger skipped: no uncollected coins');
+            return;
+        }
+
+        const hintCoinNode = this.getSmartHintTarget();
         if (hintCoinNode && hintCoinNode.isValid) { 
-            this.isHintActive = true; 
-            this.playTapTutorial(hintCoinNode, false); 
-        } 
+            this.isHintPending = true;
+            this.logHintDebug('hint target selected', {
+                target: hintCoinNode.name,
+                targetPairId: hintCoinNode.getComponent(CollectibleCoin)?.getPairId() ?? '',
+                visible: this.isNodeOnCurrentScreen(hintCoinNode),
+            });
+            this.showIdleHintOnCurrentScreen(hintCoinNode);
+            return;
+        }
+
+        this.logHintDebug('trigger skipped: no valid smart target', {
+            liveItems: this.getLiveCollectibleItems().length,
+            visibleItems: this.getVisibleCollectibleItems(this.getLiveCollectibleItems()).length,
+            uncollected: this.uncollectedCoins.length,
+        });
+    }
+
+    private getSmartHintTarget() {
+        const liveItems = this.getLiveCollectibleItems();
+        if (liveItems.length === 0) return null;
+
+        const visibleItems = this.getVisibleCollectibleItems(liveItems);
+        if (visibleItems.length === 0) {
+            this.logHintDebug('no visible items for idle hint', { liveItems: liveItems.length });
+            return null;
+        }
+
+        const selectedItem = visibleItems.find(item => item.isWaitingForPair());
+        if (selectedItem) {
+            const pairItem = this.findPairItem(selectedItem);
+            if (pairItem?.node?.isValid && this.isNodeOnCurrentScreen(pairItem.node)) {
+                return pairItem.node;
+            }
+        }
+
+        const availablePairs = this.getAvailableHintPairs(visibleItems);
+        if (availablePairs.length > 0) {
+            const pairIndex = this.nextHintPairIndex % availablePairs.length;
+            this.nextHintPairIndex++;
+            const pair = availablePairs[pairIndex];
+            return pair[0].node;
+        }
+
+        return visibleItems[0]?.node ?? null;
+    }
+
+    private getLiveCollectibleItems() {
+        return this.uncollectedCoins
+            .filter(itemNode => itemNode?.isValid)
+            .map(itemNode => itemNode.getComponent(CollectibleCoin))
+            .filter((item): item is CollectibleCoin => !!item && !item.isAlreadyCollected());
+    }
+
+    private getVisibleCollectibleItems(items: CollectibleCoin[]) {
+        return items.filter(item => this.isNodeOnCurrentScreen(item.node));
+    }
+
+    private isNodeOnCurrentScreen(targetNode: Node | null) {
+        if (!targetNode?.isValid) return false;
+
+        const canvas = this.node.scene?.getChildByName('Canvas');
+        const canvasTransform = canvas?.getComponent(UITransform);
+        if (!canvasTransform) return true;
+
+        const targetTransform = targetNode.getComponent(UITransform);
+        if (!targetTransform) return false;
+
+        const canvasPosition = canvasTransform.convertToNodeSpaceAR(targetTransform.convertToWorldSpaceAR(v3(0, 0, 0)));
+        const halfWidth = canvasTransform.contentSize.width * 0.5;
+        const halfHeight = canvasTransform.contentSize.height * 0.5;
+        const margin = 35;
+
+        return canvasPosition.x >= -halfWidth + margin
+            && canvasPosition.x <= halfWidth - margin
+            && canvasPosition.y >= -halfHeight + margin
+            && canvasPosition.y <= halfHeight - margin;
+    }
+
+    private getAvailableHintPairs(items: CollectibleCoin[]) {
+        const pairs: CollectibleCoin[][] = [];
+        const itemsByPairId = new Map<string, CollectibleCoin[]>();
+
+        items.forEach(item => {
+            const pairId = item.getPairId();
+            if (!pairId) return;
+
+            const pairItems = itemsByPairId.get(pairId) ?? [];
+            pairItems.push(item);
+            itemsByPairId.set(pairId, pairItems);
+        });
+
+        itemsByPairId.forEach(pairItems => {
+            if (pairItems.length >= 2) {
+                pairs.push([pairItems[0], pairItems[1]]);
+            }
+        });
+
+        return pairs;
+    }
+
+    private logIdleStateOnce(key: string, data?: Record<string, unknown>) {
+        if (this.lastIdleDebugKey === key) return;
+        this.lastIdleDebugKey = key;
+        this.logHintDebug(`idle ${key}`, data);
+    }
+
+    private logIdleProgress() {
+        this.lastIdleDebugKey = 'counting';
+        if (!this.enableHintDebugLogs) return;
+
+        const wholeSecond = Math.floor(this.idleTimer);
+        if (wholeSecond === this.lastIdleDebugSecond || wholeSecond % 5 !== 0) return;
+
+        this.lastIdleDebugSecond = wholeSecond;
+        console.log('[HintDebug] idle counting', {
+            idleTimer: this.idleTimer.toFixed(2),
+            hintInterval: this.hintInterval,
+            uncollected: this.uncollectedCoins.length,
+        });
+    }
+
+    private logHintDebug(message: string, data?: Record<string, unknown>) {
+        if (!this.enableHintDebugLogs) return;
+        if (data) {
+            console.log(`[HintDebug] ${message}`, data);
+        } else {
+            console.log(`[HintDebug] ${message}`);
+        }
     }
 
     private hideInstructionText() { if (!this.instructionText) return; tween(this.instructionText).stop(); const opacityComp = this.instructionText.getComponent(UIOpacity); if (opacityComp) { tween(opacityComp).to(0.3, { opacity: 0 }, { easing: 'backIn' }).start(); } tween(this.instructionText).to(0.3, { scale: Vec3.ZERO }, { easing: 'backIn' }).call(() => { if (this.instructionText) this.instructionText.active = false; }).start(); }
@@ -362,7 +540,7 @@ export class GameManager extends Component {
         this.stopTutorial();
         this.focusPanOnPair(firstTappedItem.node, pairItem.node);
         this.playPairPulse(pairItem);
-        this.showOpeningPairHandAfterPan(pairItem);
+        this.showOpeningPairHandAfterPan(firstTappedItem, pairItem.getPairId());
         return true;
     }
 
@@ -370,8 +548,12 @@ export class GameManager extends Component {
         const pairId = item.getPairId();
         if (!pairId) return null;
 
+        return this.findPairItemById(pairId, item.node);
+    }
+
+    private findPairItemById(pairId: string, excludeNode?: Node | null) {
         const pairNode = this.allCollectibleItems.find(itemNode => {
-            if (!itemNode?.isValid || itemNode === item.node) return false;
+            if (!itemNode?.isValid || itemNode === excludeNode) return false;
             const collectible = itemNode.getComponent(CollectibleCoin);
             return !!collectible && !collectible.isAlreadyCollected() && collectible.getPairId() === pairId;
         }) ?? null;
@@ -382,11 +564,18 @@ export class GameManager extends Component {
     private createSadReactionEffects() {
         const canvas = this.node.scene?.getChildByName('Canvas');
         const bgNode = canvas?.getChildByName('BG');
-        if (!bgNode || bgNode.getChildByName('SadReactionEffects')) return;
+        if (!bgNode) return;
+
+        const existingEffectsRoot = bgNode.getChildByName('SadReactionEffects');
+        if (existingEffectsRoot) {
+            this.sadReactionEffectsRoot = existingEffectsRoot;
+            return;
+        }
 
         const effectsRoot = new Node('SadReactionEffects');
         bgNode.addChild(effectsRoot);
         effectsRoot.setPosition(Vec3.ZERO);
+        this.sadReactionEffectsRoot = effectsRoot;
 
         const parentCenter = this.getEffectPosition(this.parentCryAnchor, effectsRoot, new Vec3(1960 - 1920, 1080 - 582, 0));
         const childCenter = this.getEffectPosition(this.childCryAnchor, effectsRoot, new Vec3(1444 - 1920, 1080 - 704, 0));
@@ -396,6 +585,193 @@ export class GameManager extends Component {
         this.createChildIrritationMark(effectsRoot, new Vec3(childCenter.x + 70, childCenter.y + 120, 0));
         this.startCryingShake(this.motherCryNode ?? bgNode.getChildByName('Mother'), 7, 1.5, 0);
         this.startCryingShake(this.childCryNode ?? bgNode.getChildByName('Child'), 10, 2.2, 0.12);
+    }
+
+    private playHappyLadyReaction() {
+        const happyNode = this.getHappyLadyNode();
+        if (!happyNode?.isValid) return;
+
+        const reactionId = ++this.happyLadyReactionId;
+        this.setSadMotherVisible(false);
+
+        tween(happyNode).stop();
+        const happyOpacity = happyNode.getComponent(UIOpacity) ?? happyNode.addComponent(UIOpacity);
+        tween(happyOpacity).stop();
+
+        if (!this.happyLadyBaseScale) {
+            this.happyLadyBaseScale = happyNode.scale.clone();
+        }
+
+        const baseScale = this.happyLadyBaseScale;
+        const introScale = new Vec3(baseScale.x * 0.8, baseScale.y * 0.8, baseScale.z);
+        const popScale = new Vec3(baseScale.x * 1.08, baseScale.y * 1.08, baseScale.z);
+        const settleScale = new Vec3(baseScale.x, baseScale.y, baseScale.z);
+        const pulseScale = new Vec3(baseScale.x * 1.05, baseScale.y * 1.05, baseScale.z);
+        const outroScale = new Vec3(baseScale.x * 0.88, baseScale.y * 0.88, baseScale.z);
+
+        happyNode.active = true;
+        happyOpacity.opacity = 0;
+        happyNode.setScale(introScale);
+
+        tween(happyOpacity)
+            .to(0.12, { opacity: 255 }, { easing: 'quadOut' })
+            .delay(1.0)
+            .to(0.2, { opacity: 0 }, { easing: 'quadIn' })
+            .call(() => {
+                if (reactionId !== this.happyLadyReactionId) return;
+                if (happyNode.isValid) {
+                    happyNode.active = this.keepHappyLadyVisible;
+                }
+                if (!this.isGameOver && !this.keepHappyLadyVisible) {
+                    this.setSadMotherVisible(true);
+                }
+            })
+            .start();
+
+        tween(happyNode)
+            .to(0.2, { scale: popScale }, { easing: 'backOut' })
+            .to(0.18, { scale: settleScale }, { easing: 'sineInOut' })
+            .to(0.18, { scale: pulseScale }, { easing: 'sineInOut' })
+            .delay(0.55)
+            .to(0.2, { scale: outroScale }, { easing: 'quadIn' })
+            .start();
+
+        this.createHappySparkles(happyNode);
+    }
+
+    private resetHappyLadyReaction() {
+        this.happyLadyReactionId++;
+        const happyNode = this.getHappyLadyNode();
+        if (happyNode?.isValid) {
+            tween(happyNode).stop();
+            const opacity = happyNode.getComponent(UIOpacity);
+            if (opacity) {
+                tween(opacity).stop();
+                opacity.opacity = 0;
+            }
+            if (this.happyLadyBaseScale) {
+                happyNode.setScale(this.happyLadyBaseScale);
+            }
+            happyNode.active = false;
+        }
+
+        this.setSadMotherVisible(true);
+    }
+
+    private showFinalHappyLadyState() {
+        const happyNode = this.getHappyLadyNode();
+        if (!happyNode?.isValid) return;
+
+        this.keepHappyLadyVisible = true;
+        this.happyLadyReactionId++;
+        this.setSadMotherVisible(false);
+
+        tween(happyNode).stop();
+        const happyOpacity = happyNode.getComponent(UIOpacity) ?? happyNode.addComponent(UIOpacity);
+        tween(happyOpacity).stop();
+
+        if (!this.happyLadyBaseScale) {
+            this.happyLadyBaseScale = happyNode.scale.clone();
+        }
+
+        const baseScale = this.happyLadyBaseScale;
+        happyNode.active = true;
+        happyOpacity.opacity = 255;
+        happyNode.setScale(baseScale);
+
+        tween(happyNode)
+            .to(0.35, {
+                scale: new Vec3(baseScale.x * 1.05, baseScale.y * 1.05, baseScale.z)
+            }, { easing: 'sineInOut' })
+            .to(0.35, { scale: baseScale }, { easing: 'sineInOut' })
+            .union()
+            .repeatForever()
+            .start();
+
+        this.createHappySparkles(happyNode);
+    }
+
+    private getHappyLadyNode() {
+        if (this.happyLadyNode?.isValid) return this.happyLadyNode;
+        return this.node.scene?.getChildByName('Canvas')?.getChildByName('BG')?.getChildByName('happy lady') ?? null;
+    }
+
+    private getSadMotherNode() {
+        if (this.motherCryNode?.isValid) return this.motherCryNode;
+        return this.node.scene?.getChildByName('Canvas')?.getChildByName('BG')?.getChildByName('Mother') ?? null;
+    }
+
+    private getSadReactionEffectsRoot() {
+        if (this.sadReactionEffectsRoot?.isValid) return this.sadReactionEffectsRoot;
+        this.sadReactionEffectsRoot = this.node.scene?.getChildByName('Canvas')?.getChildByName('BG')?.getChildByName('SadReactionEffects') ?? null;
+        return this.sadReactionEffectsRoot;
+    }
+
+    private setSadMotherVisible(isVisible: boolean) {
+        const sadMotherNode = this.getSadMotherNode();
+        if (sadMotherNode?.isValid) {
+            sadMotherNode.active = isVisible;
+        }
+
+        const effectsRoot = this.getSadReactionEffectsRoot();
+        if (effectsRoot?.isValid) {
+            effectsRoot.active = isVisible;
+        }
+    }
+
+    private createHappySparkles(parent: Node) {
+        const sparkleRoot = new Node('HappyLadySparkles');
+        parent.addChild(sparkleRoot);
+        sparkleRoot.setPosition(Vec3.ZERO);
+
+        const sparklePositions = [
+            new Vec3(-145, 210, 0),
+            new Vec3(120, 235, 0),
+            new Vec3(-120, -10, 0),
+            new Vec3(155, 40, 0),
+        ];
+
+        sparklePositions.forEach((position, index) => {
+            const sparkle = new Node(`HappySparkle-${index}`);
+            sparkleRoot.addChild(sparkle);
+            sparkle.setPosition(position);
+            sparkle.setScale(new Vec3(0.2, 0.2, 1));
+            sparkle.addComponent(UITransform).setContentSize(70, 70);
+
+            const opacity = sparkle.addComponent(UIOpacity);
+            opacity.opacity = 0;
+
+            const graphics = sparkle.addComponent(Graphics);
+            graphics.strokeColor = new Color(255, 235, 75, 255);
+            graphics.lineWidth = 7;
+            graphics.moveTo(0, 32);
+            graphics.lineTo(0, -32);
+            graphics.moveTo(-32, 0);
+            graphics.lineTo(32, 0);
+            graphics.moveTo(-22, 22);
+            graphics.lineTo(22, -22);
+            graphics.moveTo(22, 22);
+            graphics.lineTo(-22, -22);
+            graphics.stroke();
+
+            tween(opacity)
+                .delay(index * 0.06)
+                .to(0.16, { opacity: 255 }, { easing: 'quadOut' })
+                .to(0.36, { opacity: 0 }, { easing: 'quadIn' })
+                .start();
+
+            tween(sparkle)
+                .delay(index * 0.06)
+                .to(0.38, { scale: Vec3.ONE, eulerAngles: new Vec3(0, 0, 35) }, { easing: 'backOut' })
+                .to(0.18, { scale: new Vec3(0.55, 0.55, 1), eulerAngles: new Vec3(0, 0, 55) }, { easing: 'quadIn' })
+                .start();
+        });
+
+        this.scheduleOnce(() => {
+            if (sparkleRoot.isValid) {
+                sparkleRoot.destroy();
+            }
+        }, 0.9);
     }
 
     private getEffectPosition(anchorNode: Node | null, targetParent: Node, fallbackPosition: Vec3) {
@@ -721,6 +1097,7 @@ export class GameManager extends Component {
     private stopTutorial() {
         this.openingPairTutorialId++;
         this.isHintActive = false;
+        this.isHintPending = false;
         if (this.handTween) { this.handTween.stop(); this.handTween = null; }
         if (this.coinTween) { this.coinTween.stop(); this.coinTween = null; }
         if (this.glowTween) { this.glowTween.stop(); this.glowTween = null; }
@@ -818,21 +1195,45 @@ export class GameManager extends Component {
         this.panRoot.setPosition(this.getClampedPanPosition(nextPosition));
     }
 
-    private showOpeningPairHandAfterPan(pairItem: CollectibleCoin) {
+    private showIdleHintOnCurrentScreen(targetNode: Node) {
+        const tutorialId = ++this.openingPairTutorialId;
+        if (tutorialId !== this.openingPairTutorialId || this.isGameOver || !targetNode?.isValid || !this.isNodeOnCurrentScreen(targetNode)) {
+            this.isHintPending = false;
+            this.isHintActive = false;
+            this.logHintDebug('idle hand canceled: target not visible', {
+                target: targetNode?.name ?? '',
+                targetValid: targetNode?.isValid ?? false,
+                visible: this.isNodeOnCurrentScreen(targetNode),
+            });
+            return;
+        }
+
+        this.isHintPending = false;
+        this.isHintActive = true;
+        this.logHintDebug('show idle hand', {
+            target: targetNode.name,
+            visible: true,
+        });
+        this.playTapTutorial(targetNode, false);
+    }
+
+    private showOpeningPairHandAfterPan(firstItem: CollectibleCoin, pairId: string) {
         const tutorialId = ++this.openingPairTutorialId;
         const waitForPan = () => {
-            if (tutorialId !== this.openingPairTutorialId || this.isGameOver || !this.panRoot || !pairItem.node?.isValid || pairItem.isAlreadyCollected()) {
+            if (tutorialId !== this.openingPairTutorialId || this.isGameOver || !this.panRoot || !firstItem.node?.isValid || firstItem.isAlreadyCollected()) {
                 return;
             }
 
             const remainingDistance = Vec3.distance(this.panRoot.position, this.panTargetPosition);
-            if (remainingDistance > 1) {
+            if (remainingDistance > this.openingPairHandPanThreshold) {
                 this.scheduleOnce(waitForPan, 0.01);
                 return;
             }
 
             this.scheduleOnce(() => {
-                if (tutorialId === this.openingPairTutorialId && !this.isGameOver && pairItem.node?.isValid && !pairItem.isAlreadyCollected()) {
+                const pairItem = this.findPairItemById(pairId, firstItem.node);
+                if (tutorialId === this.openingPairTutorialId && !this.isGameOver && pairItem?.node?.isValid && !pairItem.isAlreadyCollected()) {
+                    this.idleTimer = 0;
                     this.playHandOnlyTutorial(pairItem.node);
                 }
             }, this.openingPairHandDelay);
