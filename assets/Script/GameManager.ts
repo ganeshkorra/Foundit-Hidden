@@ -954,30 +954,30 @@ export class GameManager extends Component {
             graphics.ellipse(-5 * sizeMultiplier, 5 * sizeMultiplier, 4 * sizeMultiplier, 10 * sizeMultiplier);
             graphics.fill();
 
-            const streamDelay = delay + i * 0.24;
-            const driftX = i % 2 === 0 ? -18 : 16;
+            const streamDelay = delay + i * 0.28;
+            const driftX = i % 2 === 0 ? -16 : 14;
             tween(tearNode)
                 .delay(streamDelay)
                 .call(() => {
                     tearNode.setPosition(startPosition);
-                    tearNode.setScale(new Vec3(0.45, 0.45, 1));
+                    tearNode.setScale(new Vec3(0.5, 0.5, 1));
                     opacity.opacity = 0;
                 })
                 .call(() => {
                     tween(opacity)
-                        .to(0.12, { opacity: 255 })
-                        .delay(0.52)
-                        .to(0.18, { opacity: 0 })
+                        .to(0.15, { opacity: 240 }, { easing: 'quadOut' })
+                        .delay(0.55)
+                        .to(0.2, { opacity: 0 }, { easing: 'quadIn' })
                         .start();
                 })
-                .to(0.82, {
+                .to(1.0, {
                     position: new Vec3(startPosition.x + driftX, groundY, 0),
-                    scale: new Vec3(0.9, 0.9, 1)
-                }, { easing: 'quadIn' })
+                    scale: new Vec3(0.85, 0.85, 1)
+                }, { easing: 'cubicIn' })
                 .call(() => {
                     opacity.opacity = 0;
                 })
-                .delay(0.1)
+                .delay(0.15)
                 .union()
                 .repeatForever()
                 .start();
@@ -1012,25 +1012,25 @@ export class GameManager extends Component {
             graphics.fill();
             graphics.stroke();
 
-            const splashDelay = delay + i * 0.12;
-            const endX = eyePosition.x + direction * (90 + i * 12);
-            const endY = eyePosition.y + 32 - i * 14;
+            const splashDelay = delay + i * 0.14;
+            const endX = eyePosition.x + direction * (95 + i * 10);
+            const endY = eyePosition.y + 35 - i * 12;
 
             tween(dropNode)
                 .delay(splashDelay)
                 .call(() => {
                     dropNode.setPosition(eyePosition);
-                    dropNode.setScale(new Vec3(0.35, 0.35, 1));
+                    dropNode.setScale(new Vec3(0.4, 0.4, 1));
                     opacity.opacity = 255;
                 })
-                .to(0.34, {
+                .to(0.42, {
                     position: new Vec3(endX, endY, 0),
-                    scale: new Vec3(0.9, 0.9, 1)
-                }, { easing: 'quadOut' })
+                    scale: new Vec3(0.85, 0.85, 1)
+                }, { easing: 'cubicOut' })
                 .call(() => {
                     opacity.opacity = 0;
                 })
-                .delay(0.35)
+                .delay(0.4)
                 .union()
                 .repeatForever()
                 .start();
@@ -1058,8 +1058,9 @@ export class GameManager extends Component {
         graphics.stroke();
 
         tween(markNode)
-            .to(0.28, { scale: new Vec3(1.12, 1.12, 1) }, { easing: 'sineOut' })
-            .to(0.28, { scale: Vec3.ONE }, { easing: 'sineIn' })
+            .to(0.35, { scale: new Vec3(1.15, 1.15, 1) }, { easing: 'cubicOut' })
+            .to(0.35, { scale: Vec3.ONE }, { easing: 'cubicIn' })
+            .delay(0.15)
             .union()
             .repeatForever()
             .start();
@@ -1076,29 +1077,42 @@ export class GameManager extends Component {
 
         const basePosition = targetNode.position.clone();
         const baseRotation = targetNode.eulerAngles.clone();
+        const baseScale = targetNode.scale.clone();
         tween(targetNode).stop();
         targetNode.setPosition(basePosition);
         targetNode.setRotationFromEuler(baseRotation);
+        targetNode.setScale(baseScale);
 
+        // Smooth trembling/sobbing effect with vertical bob and subtle scale pulse
         tween(targetNode)
             .delay(delay)
-            .to(0.08, {
-                position: new Vec3(basePosition.x - moveAmount, basePosition.y, basePosition.z),
-                eulerAngles: new Vec3(baseRotation.x, baseRotation.y, baseRotation.z - rotationAmount)
-            }, { easing: 'sineOut' })
-            .to(0.08, {
-                position: new Vec3(basePosition.x + moveAmount, basePosition.y, basePosition.z),
-                eulerAngles: new Vec3(baseRotation.x, baseRotation.y, baseRotation.z + rotationAmount)
+            // Small upward bob
+            .to(0.15, {
+                position: new Vec3(basePosition.x, basePosition.y + 4, basePosition.z),
+                scale: new Vec3(baseScale.x * 0.98, baseScale.y * 1.02, baseScale.z)
             }, { easing: 'sineInOut' })
-            .to(0.08, {
-                position: new Vec3(basePosition.x - moveAmount * 0.55, basePosition.y, basePosition.z),
-                eulerAngles: new Vec3(baseRotation.x, baseRotation.y, baseRotation.z - rotationAmount * 0.6)
+            // Small downward bob
+            .to(0.15, {
+                position: new Vec3(basePosition.x, basePosition.y - 3, basePosition.z),
+                scale: new Vec3(baseScale.x * 1.02, baseScale.y * 0.98, baseScale.z)
             }, { easing: 'sineInOut' })
-            .to(0.08, {
+            // Gentle sideways sway
+            .to(0.2, {
+                position: new Vec3(basePosition.x + 2, basePosition.y, basePosition.z),
+                eulerAngles: new Vec3(baseRotation.x, baseRotation.y, baseRotation.z + rotationAmount * 0.3)
+            }, { easing: 'sineInOut' })
+            // Return to center
+            .to(0.2, {
+                position: new Vec3(basePosition.x - 2, basePosition.y, basePosition.z),
+                eulerAngles: new Vec3(baseRotation.x, baseRotation.y, baseRotation.z - rotationAmount * 0.3)
+            }, { easing: 'sineInOut' })
+            // Back to base
+            .to(0.15, {
                 position: basePosition,
+                scale: baseScale,
                 eulerAngles: baseRotation
-            }, { easing: 'sineOut' })
-            .delay(0.18)
+            }, { easing: 'sineInOut' })
+            .delay(0.3)
             .union()
             .repeatForever()
             .start();
