@@ -43,6 +43,12 @@ export class GameManager extends Component {
     public backgroundMusic: AudioSource | null = null;
     @property({ type: AudioSource, tooltip: "The sound for tapping a collectible." })
     public tapSound: AudioSource | null = null;
+    @property({ type: AudioSource, tooltip: "The sound for child crying." })
+    public childCrySound: AudioSource | null = null;
+    @property({ type: AudioSource, tooltip: "The sound for sad lady crying." })
+    public sadLadyCrySound: AudioSource | null = null;
+    @property({ type: AudioSource, tooltip: "The sound for happy lady reaction." })
+    public happyLadySound: AudioSource | null = null;
     @property({ type: Number })
     public gameDuration: number = 60.0;
     @property({ type: Number })
@@ -229,6 +235,9 @@ export class GameManager extends Component {
         }
 
         if (this.backgroundMusic) { this.backgroundMusic.stop(); }
+        if (this.childCrySound) { this.childCrySound.stop(); }
+        if (this.sadLadyCrySound) { this.sadLadyCrySound.stop(); }
+        if (this.happyLadySound) { this.happyLadySound.stop(); }
         this.stopTutorial();
         this.allCollectibleItems.forEach(itemNode => { 
             const button = itemNode.getComponent(Button);
@@ -350,6 +359,9 @@ export class GameManager extends Component {
 
     public resetGame() {
         if (this.backgroundMusic) { this.backgroundMusic.stop(); }
+        if (this.childCrySound) { this.childCrySound.stop(); }
+        if (this.sadLadyCrySound) { this.sadLadyCrySound.stop(); }
+        if (this.happyLadySound) { this.happyLadySound.stop(); }
         if (this.endScreenPanel) { this.endScreenPanel.active = false; }
         if (this.highlightOverlay) { this.highlightOverlay.active = false; }
         if (this.tutorialHintGlow) { this.tutorialHintGlow.active = false; } 
@@ -655,6 +667,12 @@ export class GameManager extends Component {
         const reactionId = ++this.happyLadyReactionId;
         this.setSadMotherVisible(false);
 
+        // Play happy lady sound
+        if (this.happyLadySound) {
+            this.happyLadySound.stop();
+            this.happyLadySound.play();
+        }
+
         tween(happyNode).stop();
         const happyOpacity = happyNode.getComponent(UIOpacity) ?? happyNode.addComponent(UIOpacity);
         tween(happyOpacity).stop();
@@ -777,6 +795,22 @@ export class GameManager extends Component {
         const effectsRoot = this.getSadReactionEffectsRoot();
         if (effectsRoot?.isValid) {
             effectsRoot.active = isVisible;
+        }
+
+        // Play sad lady cry sound when showing, stop when hiding
+        if (isVisible) {
+            if (this.sadLadyCrySound && !this.sadLadyCrySound.playing) {
+                this.sadLadyCrySound.loop = true;
+                this.sadLadyCrySound.play();
+            }
+            // if (this.childCrySound) {
+            //     this.childCrySound.stop();
+            //     this.childCrySound.loop = true;
+            // }
+        } else {
+            if (this.sadLadyCrySound) {
+                this.sadLadyCrySound.stop();
+            }
         }
     }
 
@@ -1033,6 +1067,12 @@ export class GameManager extends Component {
 
     private startCryingShake(targetNode: Node | null, moveAmount: number, rotationAmount: number, delay: number) {
         if (!targetNode?.isValid) return;
+
+        // Play child cry sound on loop
+        if (this.childCrySound && !this.childCrySound.playing) {
+            this.childCrySound.loop = true;
+            this.childCrySound.play();
+        }
 
         const basePosition = targetNode.position.clone();
         const baseRotation = targetNode.eulerAngles.clone();
