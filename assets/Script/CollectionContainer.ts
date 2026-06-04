@@ -213,7 +213,7 @@ export class CollectionContainer extends Component {
                 finalNode.setScale(0.05, 0.05, finalScale.z);
 
                 tween(finalNode)
-                    .to(0.18, { scale: new Vec3(finalScale.x * 1.18, finalScale.y * 1.18, finalScale.z) }, { easing: 'backOut' })
+                    .to(0.18, { scale: new Vec3(finalScale.x * 1.35, finalScale.y * 1.35, finalScale.z) }, { easing: 'backOut' })
                     .to(0.14, { scale: finalScale }, { easing: 'sineOut' })
                     .delay(0.25)
                     .call(() => {
@@ -239,7 +239,7 @@ export class CollectionContainer extends Component {
         const flightDuration = 0.5;
         const totalTravelTime = flightDelay + flightDuration;
 
-        // In-Place Click Effect (Unchanged)
+        // In-Place Click Effect - Increased size
         if (this.highlightSpriteFrame && this.ringSpriteFrame) {
              const effectNode = new Node("ClickEffect");
              canvas.addChild(effectNode);
@@ -247,19 +247,19 @@ export class CollectionContainer extends Component {
              effectNode.addComponent(UIOpacity);
              effectSprite.spriteFrame = this.highlightSpriteFrame;
              effectNode.setPosition(startLocalPos);
-             effectNode.setScale(0.2, 0.2, 1);
+             effectNode.setScale(0.28, 0.28, 1);
              const effectOpacity = effectNode.getComponent(UIOpacity)!;
-             tween(effectNode).to(0.15, { scale: new Vec3(0.1, 0.1, 1) }).call(() => { effectSprite.spriteFrame = this.ringSpriteFrame; }).to(0.3, { scale: new Vec3(0.1, 0.1, 1) }).to(0.3, {}, { onUpdate: (target, ratio) => { effectOpacity.opacity = Math.round(255 * (1 - ratio)); } }).call(() => { effectNode.destroy(); }).start();
+             tween(effectNode).to(0.15, { scale: new Vec3(0.15, 0.15, 1) }).call(() => { effectSprite.spriteFrame = this.ringSpriteFrame; }).to(0.3, { scale: new Vec3(0.15, 0.15, 1) }).to(0.3, {}, { onUpdate: (target, ratio) => { effectOpacity.opacity = Math.round(255 * (1 - ratio)); } }).call(() => { effectNode.destroy(); }).start();
         }
 
-        // Flying Coin Animation (Unchanged)
+        // Flying Coin Animation - Larger size for maximum visibility
         const animatedItem = new Node("AnimatedItem");
         canvas.addChild(animatedItem);
         const sprite = animatedItem.addComponent(Sprite);
         sprite.spriteFrame = flyingSpriteFrame;
         animatedItem.setPosition(startLocalPos);
-        animatedItem.setScale(0.2, 0.2, 1);
-        tween(animatedItem).delay(flightDelay).to(flightDuration, { position: targetLocalPos, scale: new Vec3(0.2, 0.2, 1) }, { easing: 'cubicIn' }).call(() => { animatedItem.destroy(); }).start();
+        animatedItem.setScale(1, 1, 1);
+        tween(animatedItem).delay(flightDelay).to(flightDuration, { position: targetLocalPos, scale: new Vec3(0.50, 0.50, 1) }, { easing: 'cubicIn' }).call(() => { animatedItem.destroy(); }).start();
 
         // Synchronized Effects Timer
         tween(this.node)

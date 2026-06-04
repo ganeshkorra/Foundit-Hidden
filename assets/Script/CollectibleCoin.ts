@@ -56,10 +56,10 @@ export class CollectibleCoin extends Component {
             this.buttonComponent.interactable = false;
         }
 
-        this.ensureSelectionGlow();
+        // this.ensureSelectionGlow(); // Disabled - no glow effect on item selection
         tween(this.node).stop();
-        const selectedScale = new Vec3(this.originalScale.x * 1.08, this.originalScale.y * 1.08, this.originalScale.z);
-        const pulseScale = new Vec3(this.originalScale.x * 1.13, this.originalScale.y * 1.13, this.originalScale.z);
+        const selectedScale = new Vec3(this.originalScale.x * 1.5, this.originalScale.y * 1.5, this.originalScale.z);
+        const pulseScale = new Vec3(this.originalScale.x * 1.22, this.originalScale.y * 1.22, this.originalScale.z);
         this.node.setScale(this.originalScale);
         if (this.selectionGlow) {
             tween(this.selectionGlow).stop();

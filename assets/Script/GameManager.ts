@@ -1087,32 +1087,32 @@ export class GameManager extends Component {
         tween(targetNode)
             .delay(delay)
             // Small upward bob
-            .to(0.15, {
+            .to(0.5, {
                 position: new Vec3(basePosition.x, basePosition.y + 4, basePosition.z),
                 scale: new Vec3(baseScale.x * 0.98, baseScale.y * 1.02, baseScale.z)
             }, { easing: 'sineInOut' })
             // Small downward bob
-            .to(0.15, {
+            .to(0.3, {
                 position: new Vec3(basePosition.x, basePosition.y - 3, basePosition.z),
                 scale: new Vec3(baseScale.x * 1.02, baseScale.y * 0.98, baseScale.z)
             }, { easing: 'sineInOut' })
             // Gentle sideways sway
-            .to(0.2, {
+            .to(0.3, {
                 position: new Vec3(basePosition.x + 2, basePosition.y, basePosition.z),
                 eulerAngles: new Vec3(baseRotation.x, baseRotation.y, baseRotation.z + rotationAmount * 0.3)
             }, { easing: 'sineInOut' })
             // Return to center
-            .to(0.2, {
+            .to(0.3, {
                 position: new Vec3(basePosition.x - 2, basePosition.y, basePosition.z),
                 eulerAngles: new Vec3(baseRotation.x, baseRotation.y, baseRotation.z - rotationAmount * 0.3)
             }, { easing: 'sineInOut' })
             // Back to base
-            .to(0.15, {
+            .to(0.25, {
                 position: basePosition,
                 scale: baseScale,
                 eulerAngles: baseRotation
             }, { easing: 'sineInOut' })
-            .delay(0.3)
+            .delay(0.5)
             .union()
             .repeatForever()
             .start();
@@ -1139,7 +1139,7 @@ export class GameManager extends Component {
         const worldPos = targetNode.getComponent(UITransform)!.convertToWorldSpaceAR(v3(0,0,0));
         const localPos = this.tutorialHintCoin.parent!.getComponent(UITransform)!.convertToNodeSpaceAR(worldPos);
         this.tutorialHintCoin.setPosition(localPos);
-        this.tutorialHintGlow.setPosition(localPos);
+        // this.tutorialHintGlow.setPosition(localPos);
 
         const targetSprite = targetNode.getComponent(Sprite);
         const hintSprite = this.tutorialHintCoin.getComponent(Sprite);
@@ -1148,20 +1148,21 @@ export class GameManager extends Component {
         }
         this.tutorialHintCoin.setScale(targetNode.getScale());
         this.tutorialHintCoin.active = true;
-        this.tutorialHintGlow.active = true;
+        // this.tutorialHintGlow.active = true;
 
         if (this.coinTween) { this.coinTween.stop(); }
         this.coinTween = tween(this.tutorialHintCoin)
             .to(0, { scale: new Vec3(0.55, 0.55, 1) },)
             .union().repeatForever().start();
 
-        if (this.glowTween) { this.glowTween.stop(); }
-        const glowBaseScale = 1.5;
-        this.tutorialHintGlow.setScale(new Vec3(glowBaseScale, glowBaseScale, 1));
-        this.glowTween = tween(this.tutorialHintGlow)
-            .to(1.0, { scale: new Vec3(glowBaseScale * 1.2, glowBaseScale * 1.2, 1) }, { easing: 'sineInOut' })
-            .to(1.0, { scale: new Vec3(glowBaseScale, glowBaseScale, 1) }, { easing: 'sineInOut' })
-            .union().repeatForever().start();
+        // Glow animation commented out - removed yellow glow effect
+        // if (this.glowTween) { this.glowTween.stop(); }
+        // const glowBaseScale = 1.5;
+        // this.tutorialHintGlow.setScale(new Vec3(glowBaseScale, glowBaseScale, 1));
+        // this.glowTween = tween(this.tutorialHintGlow)
+        //     .to(1.0, { scale: new Vec3(glowBaseScale * 1.2, glowBaseScale * 1.2, 1) }, { easing: 'sineInOut' })
+        //     .to(1.0, { scale: new Vec3(glowBaseScale, glowBaseScale, 1) }, { easing: 'sineInOut' })
+        //     .union().repeatForever().start();
         
         if (this.handNode) { this.handNode.active = true; }
         this.runTapAnimationLoop(targetNode);
