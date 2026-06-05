@@ -6221,7 +6221,7 @@
       "__id__": 162
     },
     "_children": [],
-    "_active": false,
+    "_active": true,
     "_components": [
       {
         "__id__": 164
@@ -7059,7 +7059,7 @@
     "__prefab": null,
     "_contentSize": {
       "__type__": "cc.Size",
-      "width": 535.6940307617188,
+      "width": 445.45281982421875,
       "height": 262.08599999999996
     },
     "_anchorPoint": {
@@ -7089,7 +7089,7 @@
       "b": 255,
       "a": 255
     },
-    "_string": "FIND ALL HIDDEN\nITEMS\n",
+    "_string": "FIND ALL\nHIDDEN ITEMS\n",
     "_horizontalAlign": 1,
     "_verticalAlign": 1,
     "_actualFontSize": 60.2,
@@ -7508,7 +7508,7 @@
         "__id__": 255
       }
     ],
-    "_active": false,
+    "_active": true,
     "_components": [
       {
         "__id__": 258
