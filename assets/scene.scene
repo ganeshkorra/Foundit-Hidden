@@ -6221,7 +6221,7 @@
       "__id__": 162
     },
     "_children": [],
-    "_active": true,
+    "_active": false,
     "_components": [
       {
         "__id__": 164
@@ -7476,7 +7476,7 @@
       "__id__": 8
     },
     "enableScreenPan": true,
-    "panPadding": 40,
+    "panPadding": 0,
     "panDragSensitivity": 1,
     "panFollowSpeed": 3,
     "openingPairHandDelay": 0.01,
@@ -7508,7 +7508,7 @@
         "__id__": 255
       }
     ],
-    "_active": true,
+    "_active": false,
     "_components": [
       {
         "__id__": 258
