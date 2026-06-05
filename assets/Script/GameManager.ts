@@ -683,19 +683,23 @@ export class GameManager extends Component {
 
         const baseScale = this.happyLadyBaseScale;
         const introScale = new Vec3(baseScale.x * 0.8, baseScale.y * 0.8, baseScale.z);
-        const popScale = new Vec3(baseScale.x * 1.08, baseScale.y * 1.08, baseScale.z);
+        const popScale = new Vec3(baseScale.x * 1.12, baseScale.y * 1.12, baseScale.z);      // Bigger pop
         const settleScale = new Vec3(baseScale.x, baseScale.y, baseScale.z);
-        const pulseScale = new Vec3(baseScale.x * 1.05, baseScale.y * 1.05, baseScale.z);
+        const bounceScale = new Vec3(baseScale.x * 1.08, baseScale.y * 1.08, baseScale.z);   // Happy bounce
         const outroScale = new Vec3(baseScale.x * 0.88, baseScale.y * 0.88, baseScale.z);
 
         happyNode.active = true;
         happyOpacity.opacity = 0;
         happyNode.setScale(introScale);
 
+        // EMOTION STATE 1: Surprise/Joy (appears and pops)
+        // EMOTION STATE 2: Sustained happiness (bouncing)
+        // EMOTION STATE 3: Fading out
+
         tween(happyOpacity)
-            .to(0.12, { opacity: 255 }, { easing: 'quadOut' })
-            .delay(1.0)
-            .to(0.2, { opacity: 0 }, { easing: 'quadIn' })
+            .to(0.15, { opacity: 255 }, { easing: 'quadOut' })
+            .delay(1.1)
+            .to(0.25, { opacity: 0 }, { easing: 'quadIn' })
             .call(() => {
                 if (reactionId !== this.happyLadyReactionId) return;
                 if (happyNode.isValid) {
@@ -708,11 +712,18 @@ export class GameManager extends Component {
             .start();
 
         tween(happyNode)
-            .to(0.2, { scale: popScale }, { easing: 'backOut' })
-            .to(0.18, { scale: settleScale }, { easing: 'sineInOut' })
-            .to(0.18, { scale: pulseScale }, { easing: 'sineInOut' })
-            .delay(0.55)
-            .to(0.2, { scale: outroScale }, { easing: 'quadIn' })
+            // SURPRISE POP: Quick expansion with elasticity
+            .to(0.18, { scale: popScale }, { easing: 'elasticOut' })
+            // SETTLE: Natural slowdown to normal
+            .to(0.25, { scale: settleScale }, { easing: 'cubicOut' })
+            // HAPPINESS BOUNCE: Joyful up motion
+            .to(0.22, { scale: bounceScale }, { easing: 'elasticOut' })
+            // CALM: Slow settle back
+            .to(0.22, { scale: settleScale }, { easing: 'cubicInOut' })
+            // Brief hold before fade
+            .delay(0.35)
+            // FADE OUT: Gentle exit
+            .to(0.25, { scale: outroScale }, { easing: 'quadIn' })
             .start();
 
         this.createHappySparkles(happyNode);
@@ -754,15 +765,23 @@ export class GameManager extends Component {
         }
 
         const baseScale = this.happyLadyBaseScale;
+        const idleScale = new Vec3(baseScale.x * 1.02, baseScale.y * 1.02, baseScale.z);    // Slightly larger for happiness
+        const bounceUpScale = new Vec3(baseScale.x * 1.08, baseScale.y * 1.08, baseScale.z);
+        const bounceDownScale = new Vec3(baseScale.x * 0.98, baseScale.y * 0.98, baseScale.z);
+
         happyNode.active = true;
         happyOpacity.opacity = 255;
         happyNode.setScale(baseScale);
 
+        // CONTINUOUS HAPPINESS: Soft, rhythmic bouncing - like genuine joy
         tween(happyNode)
-            .to(0.35, {
-                scale: new Vec3(baseScale.x * 1.05, baseScale.y * 1.05, baseScale.z)
-            }, { easing: 'sineInOut' })
-            .to(0.35, { scale: baseScale }, { easing: 'sineInOut' })
+            // Gentle bounce up
+            .to(0.35, { scale: bounceUpScale }, { easing: 'elasticOut' })
+            // Soft settle down
+            .to(0.35, { scale: bounceDownScale }, { easing: 'elasticOut' })
+            // Back to idle - natural breathing motion
+            .to(0.3, { scale: idleScale }, { easing: 'quadInOut' })
+            .delay(0.5)
             .union()
             .repeatForever()
             .start();
@@ -1083,36 +1102,34 @@ export class GameManager extends Component {
         targetNode.setRotationFromEuler(baseRotation);
         targetNode.setScale(baseScale);
 
-        // Smooth trembling/sobbing effect with vertical bob and subtle scale pulse
+        // Natural sobbing rhythm with variable intensity - mimics real crying motion
         tween(targetNode)
             .delay(delay)
-            // Small upward bob
-            .to(0.5, {
-                position: new Vec3(basePosition.x, basePosition.y + 4, basePosition.z),
-                scale: new Vec3(baseScale.x * 0.98, baseScale.y * 1.02, baseScale.z)
-            }, { easing: 'sineInOut' })
-            // Small downward bob
-            .to(0.3, {
-                position: new Vec3(basePosition.x, basePosition.y - 3, basePosition.z),
-                scale: new Vec3(baseScale.x * 1.02, baseScale.y * 0.98, baseScale.z)
-            }, { easing: 'sineInOut' })
-            // Gentle sideways sway
-            .to(0.3, {
-                position: new Vec3(basePosition.x + 2, basePosition.y, basePosition.z),
-                eulerAngles: new Vec3(baseRotation.x, baseRotation.y, baseRotation.z + rotationAmount * 0.3)
-            }, { easing: 'sineInOut' })
-            // Return to center
-            .to(0.3, {
-                position: new Vec3(basePosition.x - 2, basePosition.y, basePosition.z),
-                eulerAngles: new Vec3(baseRotation.x, baseRotation.y, baseRotation.z - rotationAmount * 0.3)
-            }, { easing: 'sineInOut' })
-            // Back to base
+            // INTENSE CRY PHASE 1: Strong upward gasp
+            .to(0.35, {
+                position: new Vec3(basePosition.x - 3, basePosition.y + 6, basePosition.z),
+                scale: new Vec3(baseScale.x * 0.96, baseScale.y * 1.04, baseScale.z),
+                eulerAngles: new Vec3(baseRotation.x, baseRotation.y, baseRotation.z - rotationAmount * 0.4)
+            }, { easing: 'cubicOut' })
+            // INTENSE CRY PHASE 2: Shake downward
             .to(0.25, {
-                position: basePosition,
+                position: new Vec3(basePosition.x + 3, basePosition.y - 5, basePosition.z),
+                scale: new Vec3(baseScale.x * 1.03, baseScale.y * 0.97, baseScale.z),
+                eulerAngles: new Vec3(baseRotation.x, baseRotation.y, baseRotation.z + rotationAmount * 0.5)
+            }, { easing: 'cubicIn' })
+            // CALM PHASE: Slower recovery
+            .to(0.4, {
+                position: new Vec3(basePosition.x + 1, basePosition.y, basePosition.z),
                 scale: baseScale,
+                eulerAngles: new Vec3(baseRotation.x, baseRotation.y, baseRotation.z + rotationAmount * 0.15)
+            }, { easing: 'quadInOut' })
+            // PAUSE before next cycle
+            .to(0.3, {
+                position: basePosition,
                 eulerAngles: baseRotation
-            }, { easing: 'sineInOut' })
-            .delay(0.5)
+            }, { easing: 'quadOut' })
+            // Brief moment of stillness (catching breath)
+            .delay(0.4)
             .union()
             .repeatForever()
             .start();
