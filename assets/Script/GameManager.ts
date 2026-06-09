@@ -76,6 +76,8 @@ export class GameManager extends Component {
     public motherCryNode: Node | null = null;
     @property({ type: Node, tooltip: "Happy mother/lady sprite shown briefly after each successful collection." })
     public happyLadyNode: Node | null = null;
+    @property({ type: Number, tooltip: "Seconds to show the happy lady after a successful pair." })
+    public happyLadyReactionDuration: number = 2;
     @property({ type: Node, tooltip: "The actual child sprite node to shake while crying." })
     public childCryNode: Node | null = null;
     @property({ type: Node, tooltip: "Large gameplay node that can be dragged to reveal off-screen collectibles. Defaults to Canvas/BG." })
@@ -121,10 +123,8 @@ export class GameManager extends Component {
     private nextHintPairIndex: number = 0;
     private lastIdleDebugKey: string = '';
     private lastIdleDebugSecond: number = -1;
-    private happyLadyBaseScale: Vec3 | null = null;
     private happyLadyReactionId: number = 0;
     private sadReactionEffectsRoot: Node | null = null;
-    private keepHappyLadyVisible: boolean = false;
     private challengeStartEventFired: boolean = false;
     private progressMilestones: Set<number> = new Set();
     
@@ -185,7 +185,9 @@ export class GameManager extends Component {
         this.updateMainProgressBar();
         this.checkAndFireProgressMilestones();
         this.totalCoinsCollected++; 
-        this.playHappyLadyReaction();
+        if (sourceNodes.length >= 2) {
+            this.playHappyLadyReaction();
+        }
 
         // Simplified win condition
         if (this.totalCoinsCollected >= this.totalCollectibleCount && this.totalCollectibleCount > 0) {
@@ -246,7 +248,6 @@ export class GameManager extends Component {
         });
 
         if (didWin) {
-            this.showFinalHappyLadyState();
             this.showLuckLevelSequence();
         } else {
             // Show sad lady before end screen
@@ -368,7 +369,6 @@ export class GameManager extends Component {
         if (this.tutorialHintGlow) { this.tutorialHintGlow.active = false; } 
         if (this.tutorialHintCoin) { this.tutorialHintCoin.active = false; }
         if (this.luckLevelPanel) { this.luckLevelPanel.active = false; }
-        this.keepHappyLadyVisible = false;
         this.resetHappyLadyReaction();
         if (this.panRoot) {
             tween(this.panRoot).stop();
@@ -654,16 +654,17 @@ export class GameManager extends Component {
         // const parentCenter = this.getEffectPosition(this.parentCryAnchor, effectsRoot, new Vec3(1960 - 1920, 1080 - 582, 0));
         const childCenter = this.getEffectPosition(this.childCryAnchor, effectsRoot, new Vec3(1444 - 1920, 1080 - 704, 0));
 
-        // --- COMMENTED OUT: Tear and shaking animation ---
+        // Keep the baby's crying effects, but do not add effects to either lady.
         // this.createParentCryingEffect(effectsRoot, parentCenter);
-        // this.createChildSprinkleCryingEffect(effectsRoot, childCenter);
-        // this.createChildIrritationMark(effectsRoot, new Vec3(childCenter.x + 70, childCenter.y + 120, 0));
+        this.createChildSprinkleCryingEffect(effectsRoot, childCenter);
+        this.createChildIrritationMark(effectsRoot, new Vec3(childCenter.x + 70, childCenter.y + 120, 0));
         // this.startCryingShake(this.motherCryNode ?? bgNode.getChildByName('Mother'), 7, 1.5, 0);
         // this.startCryingShake(this.childCryNode ?? bgNode.getChildByName('Child'), 10, 2.2, 0.12);
         
         // --- USE FRAME ANIMATOR FOR SAD LADY ---
         const sadMotherNode = this.motherCryNode ?? bgNode.getChildByName('Mother');
         if (sadMotherNode?.isValid) {
+            this.prepareLadyFrameAnimation(sadMotherNode);
             const frameAnimator = sadMotherNode.getComponent(FrameAnimator);
             if (frameAnimator) {
                 frameAnimator.play();
@@ -677,6 +678,8 @@ export class GameManager extends Component {
 
         const reactionId = ++this.happyLadyReactionId;
         this.setSadMotherVisible(false);
+        this.prepareLadyFrameAnimation(happyNode);
+        happyNode.active = true;
 
         // Play happy lady sound
         if (this.happyLadySound) {
@@ -690,128 +693,27 @@ export class GameManager extends Component {
             happyFrameAnimator.play();
         }
 
-        happyNode.active = true;
-
-        // --- COMMENTED OUT: Scale animations, pop, squeeze ---
-        // tween(happyNode).stop();
-        // const happyOpacity = happyNode.getComponent(UIOpacity) ?? happyNode.addComponent(UIOpacity);
-        // tween(happyOpacity).stop();
-
-        // if (!this.happyLadyBaseScale) {
-        //     this.happyLadyBaseScale = happyNode.scale.clone();
-        // }
-
-        // const baseScale = this.happyLadyBaseScale;
-        // const introScale = new Vec3(baseScale.x * 0.75, baseScale.y * 0.75, baseScale.z);
-        // const popScale = new Vec3(baseScale.x * 1.15, baseScale.y * 1.15, baseScale.z);      // Bigger pop
-        // const settleScale = new Vec3(baseScale.x * 0.98, baseScale.y * 0.98, baseScale.z);
-        // const bounceScale = new Vec3(baseScale.x * 1.1, baseScale.y * 1.1, baseScale.z);    // Happy bounce
-        // const outroScale = new Vec3(baseScale.x * 0.85, baseScale.y * 0.85, baseScale.z);
-
-        // happyOpacity.opacity = 0;
-        // happyNode.setScale(introScale);
-
-        // // EMOTION STATE 1: Surprise/Joy (appears and pops smoothly)
-        // // EMOTION STATE 2: Sustained happiness (bouncing)
-        // // EMOTION STATE 3: Fading out gracefully
-
-        // tween(happyOpacity)
-        //     .to(0.25, { opacity: 255 }, { easing: 'quadOut' })
-        //     .delay(1.3)
-        //     .to(0.35, { opacity: 0 }, { easing: 'quadIn' })
-        //     .call(() => {
-        //         if (reactionId !== this.happyLadyReactionId) return;
-        //         if (happyNode.isValid) {
-        //             happyNode.active = this.keepHappyLadyVisible;
-        //         }
-        //         if (!this.isGameOver && !this.keepHappyLadyVisible) {
-        //             this.setSadMotherVisible(true);
-        //         }
-        //     })
-        //     .start();
-
-        // tween(happyNode)
-        //     // INTRO: Appear from small scale
-        //     .to(0.3, { scale: settleScale }, { easing: 'backOut' })
-        //     // SURPRISE POP: Smooth expansion with elasticity
-        //     .to(0.35, { scale: popScale }, { easing: 'elasticOut' })
-        //     // SETTLE: Gentle return to normal
-        //     .to(0.4, { scale: settleScale }, { easing: 'cubicOut' })
-        //     // HAPPINESS BOUNCE 1: Upward joyful motion
-        //     .to(0.35, { scale: bounceScale }, { easing: 'elasticOut' })
-        //     // CALM: Slow settle back to normal
-        //     .to(0.35, { scale: settleScale }, { easing: 'cubicInOut' })
-        //     // Brief hold before fade
-        //     .delay(0.4)
-        //     // FADE OUT: Gentle shrink exit
-        //     .to(0.35, { scale: outroScale }, { easing: 'quadIn' })
-        //     .start();
-
-        // this.createHappySparkles(happyNode);
+        this.scheduleOnce(() => {
+            if (reactionId !== this.happyLadyReactionId) return;
+            this.hideHappyLadyAndShowSadMother();
+        }, this.happyLadyReactionDuration);
     }
 
     private resetHappyLadyReaction() {
         this.happyLadyReactionId++;
-        const happyNode = this.getHappyLadyNode();
-        if (happyNode?.isValid) {
-            tween(happyNode).stop();
-            const opacity = happyNode.getComponent(UIOpacity);
-            if (opacity) {
-                tween(opacity).stop();
-                opacity.opacity = 0;
-            }
-            if (this.happyLadyBaseScale) {
-                happyNode.setScale(this.happyLadyBaseScale);
-            }
-            happyNode.active = false;
-        }
-
-        this.setSadMotherVisible(true);
+        this.hideHappyLadyAndShowSadMother();
     }
 
-    private showFinalHappyLadyState() {
+    private hideHappyLadyAndShowSadMother() {
         const happyNode = this.getHappyLadyNode();
-        if (!happyNode?.isValid) return;
-
-        this.keepHappyLadyVisible = true;
-        this.happyLadyReactionId++;
-        this.setSadMotherVisible(false);
-
-        tween(happyNode).stop();
-        const happyOpacity = happyNode.getComponent(UIOpacity) ?? happyNode.addComponent(UIOpacity);
-        tween(happyOpacity).stop();
-
-        if (!this.happyLadyBaseScale) {
-            this.happyLadyBaseScale = happyNode.scale.clone();
+        if (happyNode?.isValid) {
+            happyNode.getComponent(FrameAnimator)?.stop();
+            happyNode.active = false;
         }
-
-        const baseScale = this.happyLadyBaseScale;
-        const idleScale = new Vec3(baseScale.x * 1.0, baseScale.y * 1.0, baseScale.z);      // Natural resting state
-        // const breatheInScale = new Vec3(baseScale.x * 1.03, baseScale.y * 1.03, baseScale.z); // Gentle inhale
-        // const bounceUpScale = new Vec3(baseScale.x * 1.1, baseScale.y * 1.1, baseScale.z);  // Joy bounce up
-        // const bounceDownScale = new Vec3(baseScale.x * 0.97, baseScale.y * 0.97, baseScale.z); // Soft settle
-
-        happyNode.active = true;
-        happyOpacity.opacity = 255;
-        happyNode.setScale(baseScale);
-
-        // CONTINUOUS HAPPINESS: Smooth, organic breathing and gentle bouncing - like genuine sustained joy
-        // tween(happyNode)
-        //     // Gentle breathing in (expansion)
-        //     .to(0.6, { scale: breatheInScale }, { easing: 'sineOut' })
-        //     // Joyful bounce up (elastic, happy motion)
-        //     .to(0.5, { scale: bounceUpScale }, { easing: 'elasticOut' })
-        //     // Soft settle down (natural gravity)
-        //     .to(0.5, { scale: bounceDownScale }, { easing: 'elasticOut' })
-        //     // Breathing out (back to natural)
-        //     .to(0.6, { scale: idleScale }, { easing: 'sineInOut' })
-            // Pause to feel the contentment
-            // .delay(0.7)
-            // .union()
-            // .repeatForever()
-            // .start();
-
-        // this.createHappySparkles(happyNode);
+        if (this.happyLadySound) {
+            this.happyLadySound.stop();
+        }
+        this.setSadMotherVisible(true);
     }
 
     private getHappyLadyNode() {
@@ -830,10 +732,27 @@ export class GameManager extends Component {
         return this.sadReactionEffectsRoot;
     }
 
+    private prepareLadyFrameAnimation(ladyNode: Node) {
+        // Frame animation stays active; only external node motion and trim-based popping are disabled.
+        tween(ladyNode).stop();
+        const sprite = ladyNode.getComponent(Sprite);
+        if (sprite) {
+            sprite.sizeMode = Sprite.SizeMode.CUSTOM;
+            sprite.trim = false;
+        }
+    }
+
     private setSadMotherVisible(isVisible: boolean) {
         const sadMotherNode = this.getSadMotherNode();
         if (sadMotherNode?.isValid) {
             sadMotherNode.active = isVisible;
+            const sadFrameAnimator = sadMotherNode.getComponent(FrameAnimator);
+            if (isVisible) {
+                this.prepareLadyFrameAnimation(sadMotherNode);
+                sadFrameAnimator?.play();
+            } else {
+                sadFrameAnimator?.stop();
+            }
         }
 
         const effectsRoot = this.getSadReactionEffectsRoot();
