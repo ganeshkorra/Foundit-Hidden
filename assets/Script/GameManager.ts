@@ -4,6 +4,7 @@ import { _decorator, Component, Node, director, ProgressBar, Label, Button, twee
 import { CollectibleCoin, COLLECT_COIN_EVENT, ITEM_TAPPED_EVENT } from './CollectibleCoin';
 import { CollectionContainer, CONTAINER_COMPLETE_EVENT } from './CollectionContainer';
 import { Analytics, analyticsEvents } from './Analytics';
+import { FrameAnimator } from './FrameAnimator';
 
 declare const mraid: any;
 const { ccclass, property } = _decorator;
@@ -650,14 +651,24 @@ export class GameManager extends Component {
         
         this.sadReactionEffectsRoot = effectsRoot;
 
-        const parentCenter = this.getEffectPosition(this.parentCryAnchor, effectsRoot, new Vec3(1960 - 1920, 1080 - 582, 0));
+        // const parentCenter = this.getEffectPosition(this.parentCryAnchor, effectsRoot, new Vec3(1960 - 1920, 1080 - 582, 0));
         const childCenter = this.getEffectPosition(this.childCryAnchor, effectsRoot, new Vec3(1444 - 1920, 1080 - 704, 0));
 
-        this.createParentCryingEffect(effectsRoot, parentCenter);
-        this.createChildSprinkleCryingEffect(effectsRoot, childCenter);
-        this.createChildIrritationMark(effectsRoot, new Vec3(childCenter.x + 70, childCenter.y + 120, 0));
-        this.startCryingShake(this.motherCryNode ?? bgNode.getChildByName('Mother'), 7, 1.5, 0);
-        this.startCryingShake(this.childCryNode ?? bgNode.getChildByName('Child'), 10, 2.2, 0.12);
+        // --- COMMENTED OUT: Tear and shaking animation ---
+        // this.createParentCryingEffect(effectsRoot, parentCenter);
+        // this.createChildSprinkleCryingEffect(effectsRoot, childCenter);
+        // this.createChildIrritationMark(effectsRoot, new Vec3(childCenter.x + 70, childCenter.y + 120, 0));
+        // this.startCryingShake(this.motherCryNode ?? bgNode.getChildByName('Mother'), 7, 1.5, 0);
+        // this.startCryingShake(this.childCryNode ?? bgNode.getChildByName('Child'), 10, 2.2, 0.12);
+        
+        // --- USE FRAME ANIMATOR FOR SAD LADY ---
+        const sadMotherNode = this.motherCryNode ?? bgNode.getChildByName('Mother');
+        if (sadMotherNode?.isValid) {
+            const frameAnimator = sadMotherNode.getComponent(FrameAnimator);
+            if (frameAnimator) {
+                frameAnimator.play();
+            }
+        }
     }
 
     private playHappyLadyReaction() {
@@ -673,62 +684,70 @@ export class GameManager extends Component {
             this.happyLadySound.play();
         }
 
-        tween(happyNode).stop();
-        const happyOpacity = happyNode.getComponent(UIOpacity) ?? happyNode.addComponent(UIOpacity);
-        tween(happyOpacity).stop();
-
-        if (!this.happyLadyBaseScale) {
-            this.happyLadyBaseScale = happyNode.scale.clone();
+        // --- ACTIVATE HAPPY LADY FRAME ANIMATOR ---
+        const happyFrameAnimator = happyNode.getComponent(FrameAnimator);
+        if (happyFrameAnimator) {
+            happyFrameAnimator.play();
         }
 
-        const baseScale = this.happyLadyBaseScale;
-        const introScale = new Vec3(baseScale.x * 0.75, baseScale.y * 0.75, baseScale.z);
-        const popScale = new Vec3(baseScale.x * 1.15, baseScale.y * 1.15, baseScale.z);      // Bigger pop
-        const settleScale = new Vec3(baseScale.x * 0.98, baseScale.y * 0.98, baseScale.z);
-        const bounceScale = new Vec3(baseScale.x * 1.1, baseScale.y * 1.1, baseScale.z);    // Happy bounce
-        const outroScale = new Vec3(baseScale.x * 0.85, baseScale.y * 0.85, baseScale.z);
-
         happyNode.active = true;
-        happyOpacity.opacity = 0;
-        happyNode.setScale(introScale);
 
-        // EMOTION STATE 1: Surprise/Joy (appears and pops smoothly)
-        // EMOTION STATE 2: Sustained happiness (bouncing)
-        // EMOTION STATE 3: Fading out gracefully
+        // --- COMMENTED OUT: Scale animations, pop, squeeze ---
+        // tween(happyNode).stop();
+        // const happyOpacity = happyNode.getComponent(UIOpacity) ?? happyNode.addComponent(UIOpacity);
+        // tween(happyOpacity).stop();
 
-        tween(happyOpacity)
-            .to(0.25, { opacity: 255 }, { easing: 'quadOut' })
-            .delay(1.3)
-            .to(0.35, { opacity: 0 }, { easing: 'quadIn' })
-            .call(() => {
-                if (reactionId !== this.happyLadyReactionId) return;
-                if (happyNode.isValid) {
-                    happyNode.active = this.keepHappyLadyVisible;
-                }
-                if (!this.isGameOver && !this.keepHappyLadyVisible) {
-                    this.setSadMotherVisible(true);
-                }
-            })
-            .start();
+        // if (!this.happyLadyBaseScale) {
+        //     this.happyLadyBaseScale = happyNode.scale.clone();
+        // }
 
-        tween(happyNode)
-            // INTRO: Appear from small scale
-            .to(0.3, { scale: settleScale }, { easing: 'backOut' })
-            // SURPRISE POP: Smooth expansion with elasticity
-            .to(0.35, { scale: popScale }, { easing: 'elasticOut' })
-            // SETTLE: Gentle return to normal
-            .to(0.4, { scale: settleScale }, { easing: 'cubicOut' })
-            // HAPPINESS BOUNCE 1: Upward joyful motion
-            .to(0.35, { scale: bounceScale }, { easing: 'elasticOut' })
-            // CALM: Slow settle back to normal
-            .to(0.35, { scale: settleScale }, { easing: 'cubicInOut' })
-            // Brief hold before fade
-            .delay(0.4)
-            // FADE OUT: Gentle shrink exit
-            .to(0.35, { scale: outroScale }, { easing: 'quadIn' })
-            .start();
+        // const baseScale = this.happyLadyBaseScale;
+        // const introScale = new Vec3(baseScale.x * 0.75, baseScale.y * 0.75, baseScale.z);
+        // const popScale = new Vec3(baseScale.x * 1.15, baseScale.y * 1.15, baseScale.z);      // Bigger pop
+        // const settleScale = new Vec3(baseScale.x * 0.98, baseScale.y * 0.98, baseScale.z);
+        // const bounceScale = new Vec3(baseScale.x * 1.1, baseScale.y * 1.1, baseScale.z);    // Happy bounce
+        // const outroScale = new Vec3(baseScale.x * 0.85, baseScale.y * 0.85, baseScale.z);
 
-        this.createHappySparkles(happyNode);
+        // happyOpacity.opacity = 0;
+        // happyNode.setScale(introScale);
+
+        // // EMOTION STATE 1: Surprise/Joy (appears and pops smoothly)
+        // // EMOTION STATE 2: Sustained happiness (bouncing)
+        // // EMOTION STATE 3: Fading out gracefully
+
+        // tween(happyOpacity)
+        //     .to(0.25, { opacity: 255 }, { easing: 'quadOut' })
+        //     .delay(1.3)
+        //     .to(0.35, { opacity: 0 }, { easing: 'quadIn' })
+        //     .call(() => {
+        //         if (reactionId !== this.happyLadyReactionId) return;
+        //         if (happyNode.isValid) {
+        //             happyNode.active = this.keepHappyLadyVisible;
+        //         }
+        //         if (!this.isGameOver && !this.keepHappyLadyVisible) {
+        //             this.setSadMotherVisible(true);
+        //         }
+        //     })
+        //     .start();
+
+        // tween(happyNode)
+        //     // INTRO: Appear from small scale
+        //     .to(0.3, { scale: settleScale }, { easing: 'backOut' })
+        //     // SURPRISE POP: Smooth expansion with elasticity
+        //     .to(0.35, { scale: popScale }, { easing: 'elasticOut' })
+        //     // SETTLE: Gentle return to normal
+        //     .to(0.4, { scale: settleScale }, { easing: 'cubicOut' })
+        //     // HAPPINESS BOUNCE 1: Upward joyful motion
+        //     .to(0.35, { scale: bounceScale }, { easing: 'elasticOut' })
+        //     // CALM: Slow settle back to normal
+        //     .to(0.35, { scale: settleScale }, { easing: 'cubicInOut' })
+        //     // Brief hold before fade
+        //     .delay(0.4)
+        //     // FADE OUT: Gentle shrink exit
+        //     .to(0.35, { scale: outroScale }, { easing: 'quadIn' })
+        //     .start();
+
+        // this.createHappySparkles(happyNode);
     }
 
     private resetHappyLadyReaction() {
@@ -768,31 +787,31 @@ export class GameManager extends Component {
 
         const baseScale = this.happyLadyBaseScale;
         const idleScale = new Vec3(baseScale.x * 1.0, baseScale.y * 1.0, baseScale.z);      // Natural resting state
-        const breatheInScale = new Vec3(baseScale.x * 1.03, baseScale.y * 1.03, baseScale.z); // Gentle inhale
-        const bounceUpScale = new Vec3(baseScale.x * 1.1, baseScale.y * 1.1, baseScale.z);  // Joy bounce up
-        const bounceDownScale = new Vec3(baseScale.x * 0.97, baseScale.y * 0.97, baseScale.z); // Soft settle
+        // const breatheInScale = new Vec3(baseScale.x * 1.03, baseScale.y * 1.03, baseScale.z); // Gentle inhale
+        // const bounceUpScale = new Vec3(baseScale.x * 1.1, baseScale.y * 1.1, baseScale.z);  // Joy bounce up
+        // const bounceDownScale = new Vec3(baseScale.x * 0.97, baseScale.y * 0.97, baseScale.z); // Soft settle
 
         happyNode.active = true;
         happyOpacity.opacity = 255;
         happyNode.setScale(baseScale);
 
         // CONTINUOUS HAPPINESS: Smooth, organic breathing and gentle bouncing - like genuine sustained joy
-        tween(happyNode)
-            // Gentle breathing in (expansion)
-            .to(0.6, { scale: breatheInScale }, { easing: 'sineOut' })
-            // Joyful bounce up (elastic, happy motion)
-            .to(0.5, { scale: bounceUpScale }, { easing: 'elasticOut' })
-            // Soft settle down (natural gravity)
-            .to(0.5, { scale: bounceDownScale }, { easing: 'elasticOut' })
-            // Breathing out (back to natural)
-            .to(0.6, { scale: idleScale }, { easing: 'sineInOut' })
+        // tween(happyNode)
+        //     // Gentle breathing in (expansion)
+        //     .to(0.6, { scale: breatheInScale }, { easing: 'sineOut' })
+        //     // Joyful bounce up (elastic, happy motion)
+        //     .to(0.5, { scale: bounceUpScale }, { easing: 'elasticOut' })
+        //     // Soft settle down (natural gravity)
+        //     .to(0.5, { scale: bounceDownScale }, { easing: 'elasticOut' })
+        //     // Breathing out (back to natural)
+        //     .to(0.6, { scale: idleScale }, { easing: 'sineInOut' })
             // Pause to feel the contentment
-            .delay(0.7)
-            .union()
-            .repeatForever()
-            .start();
+            // .delay(0.7)
+            // .union()
+            // .repeatForever()
+            // .start();
 
-        this.createHappySparkles(happyNode);
+        // this.createHappySparkles(happyNode);
     }
 
     private getHappyLadyNode() {
@@ -839,60 +858,60 @@ export class GameManager extends Component {
         }
     }
 
-    private createHappySparkles(parent: Node) {
-        const sparkleRoot = new Node('HappyLadySparkles');
-        parent.addChild(sparkleRoot);
-        sparkleRoot.setPosition(Vec3.ZERO);
+    // private createHappySparkles(parent: Node) {
+    //     const sparkleRoot = new Node('HappyLadySparkles');
+    //     parent.addChild(sparkleRoot);
+    //     sparkleRoot.setPosition(Vec3.ZERO);
 
-        const sparklePositions = [
-            new Vec3(-145, 210, 0),
-            new Vec3(120, 235, 0),
-            new Vec3(-120, -10, 0),
-            new Vec3(155, 40, 0),
-        ];
+    //     const sparklePositions = [
+    //         new Vec3(-145, 210, 0),
+    //         new Vec3(120, 235, 0),
+    //         new Vec3(-120, -10, 0),
+    //         new Vec3(155, 40, 0),
+    //     ];
 
-        sparklePositions.forEach((position, index) => {
-            const sparkle = new Node(`HappySparkle-${index}`);
-            sparkleRoot.addChild(sparkle);
-            sparkle.setPosition(position);
-            sparkle.setScale(new Vec3(0.2, 0.2, 1));
-            sparkle.addComponent(UITransform).setContentSize(70, 70);
+    //     sparklePositions.forEach((position, index) => {
+    //         const sparkle = new Node(`HappySparkle-${index}`);
+    //         sparkleRoot.addChild(sparkle);
+    //         sparkle.setPosition(position);
+    //         sparkle.setScale(new Vec3(0.2, 0.2, 1));
+    //         sparkle.addComponent(UITransform).setContentSize(70, 70);
 
-            const opacity = sparkle.addComponent(UIOpacity);
-            opacity.opacity = 0;
+    //         const opacity = sparkle.addComponent(UIOpacity);
+    //         opacity.opacity = 0;
 
-            const graphics = sparkle.addComponent(Graphics);
-            graphics.strokeColor = new Color(255, 235, 75, 255);
-            graphics.lineWidth = 7;
-            graphics.moveTo(0, 32);
-            graphics.lineTo(0, -32);
-            graphics.moveTo(-32, 0);
-            graphics.lineTo(32, 0);
-            graphics.moveTo(-22, 22);
-            graphics.lineTo(22, -22);
-            graphics.moveTo(22, 22);
-            graphics.lineTo(-22, -22);
-            graphics.stroke();
+    //         const graphics = sparkle.addComponent(Graphics);
+    //         graphics.strokeColor = new Color(255, 235, 75, 255);
+    //         graphics.lineWidth = 7;
+    //         graphics.moveTo(0, 32);
+    //         graphics.lineTo(0, -32);
+    //         graphics.moveTo(-32, 0);
+    //         graphics.lineTo(32, 0);
+    //         graphics.moveTo(-22, 22);
+    //         graphics.lineTo(22, -22);
+    //         graphics.moveTo(22, 22);
+    //         graphics.lineTo(-22, -22);
+    //         graphics.stroke();
 
-            tween(opacity)
-                .delay(index * 0.06)
-                .to(0.16, { opacity: 255 }, { easing: 'quadOut' })
-                .to(0.36, { opacity: 0 }, { easing: 'quadIn' })
-                .start();
+    //         tween(opacity)
+    //             .delay(index * 0.06)
+    //             .to(0.16, { opacity: 255 }, { easing: 'quadOut' })
+    //             .to(0.36, { opacity: 0 }, { easing: 'quadIn' })
+    //             .start();
 
-            tween(sparkle)
-                .delay(index * 0.06)
-                .to(0.38, { scale: Vec3.ONE, eulerAngles: new Vec3(0, 0, 35) }, { easing: 'backOut' })
-                .to(0.18, { scale: new Vec3(0.55, 0.55, 1), eulerAngles: new Vec3(0, 0, 55) }, { easing: 'quadIn' })
-                .start();
-        });
+    //         tween(sparkle)
+    //             .delay(index * 0.06)
+    //             .to(0.38, { scale: Vec3.ONE, eulerAngles: new Vec3(0, 0, 35) }, { easing: 'backOut' })
+    //             .to(0.18, { scale: new Vec3(0.55, 0.55, 1), eulerAngles: new Vec3(0, 0, 55) }, { easing: 'quadIn' })
+    //             .start();
+    //     });
 
-        this.scheduleOnce(() => {
-            if (sparkleRoot.isValid) {
-                sparkleRoot.destroy();
-            }
-        }, 0.9);
-    }
+    //     this.scheduleOnce(() => {
+    //         if (sparkleRoot.isValid) {
+    //             sparkleRoot.destroy();
+    //         }
+    //     }, 0.9);
+    // }
 
     private getEffectPosition(anchorNode: Node | null, targetParent: Node, fallbackPosition: Vec3) {
         if (!anchorNode?.isValid) return fallbackPosition;
@@ -1100,52 +1119,53 @@ export class GameManager extends Component {
             this.childCrySound.play();
         }
 
-        const basePosition = targetNode.position.clone();
-        const baseRotation = targetNode.eulerAngles.clone();
-        const baseScale = targetNode.scale.clone();
-        tween(targetNode).stop();
-        targetNode.setPosition(basePosition);
-        targetNode.setRotationFromEuler(baseRotation);
-        targetNode.setScale(baseScale);
+        // --- COMMENTED OUT: Squeeze, shake, and sineOut animations ---
+        // const basePosition = targetNode.position.clone();
+        // const baseRotation = targetNode.eulerAngles.clone();
+        // const baseScale = targetNode.scale.clone();
+        // tween(targetNode).stop();
+        // targetNode.setPosition(basePosition);
+        // targetNode.setRotationFromEuler(baseRotation);
+        // targetNode.setScale(baseScale);
 
-        // Smooth sobbing rhythm with organic intensity - mimics real crying motion
-        tween(targetNode)
-            .delay(delay)
-            // INTAKE PHASE: Slow upward gasp with subtle shudder
-            .to(0.55, {
-                position: new Vec3(basePosition.x - 2, basePosition.y + 5, basePosition.z),
-                scale: new Vec3(baseScale.x * 0.97, baseScale.y * 1.03, baseScale.z),
-                eulerAngles: new Vec3(baseRotation.x, baseRotation.y, baseRotation.z - rotationAmount * 0.35)
-            }, { easing: 'sineOut' })
-            // SHAKE PHASE 1: Tremor downward (smooth, not jarring)
-            .to(0.45, {
-                position: new Vec3(basePosition.x + 2.5, basePosition.y - 4, basePosition.z),
-                scale: new Vec3(baseScale.x * 1.02, baseScale.y * 0.98, baseScale.z),
-                eulerAngles: new Vec3(baseRotation.x, baseRotation.y, baseRotation.z + rotationAmount * 0.4)
-            }, { easing: 'sineInOut' })
-            // SHAKE PHASE 2: Tremor upward (continuation of shudder)
-            .to(0.4, {
-                position: new Vec3(basePosition.x - 1.5, basePosition.y + 3, basePosition.z),
-                scale: new Vec3(baseScale.x * 0.98, baseScale.y * 1.02, baseScale.z),
-                eulerAngles: new Vec3(baseRotation.x, baseRotation.y, baseRotation.z + rotationAmount * 0.2)
-            }, { easing: 'sineInOut' })
-            // RECOVERY PHASE: Gradual return to rest
-            .to(0.6, {
-                position: new Vec3(basePosition.x + 0.5, basePosition.y + 1, basePosition.z),
-                scale: new Vec3(baseScale.x * 0.99, baseScale.y * 1.01, baseScale.z),
-                eulerAngles: new Vec3(baseRotation.x, baseRotation.y, baseRotation.z + rotationAmount * 0.08)
-            }, { easing: 'quadInOut' })
-            // SETTLE: Return to baseline
-            .to(0.5, {
-                position: basePosition,
-                scale: baseScale,
-                eulerAngles: baseRotation
-            }, { easing: 'quadOut' })
-            // Breathing pause (catching breath)
-            .delay(0.6)
-            .union()
-            .repeatForever()
-            .start();
+        // // Smooth sobbing rhythm with organic intensity - mimics real crying motion
+        // tween(targetNode)
+        //     .delay(delay)
+        //     // INTAKE PHASE: Slow upward gasp with subtle shudder
+        //     .to(0.55, {
+        //         position: new Vec3(basePosition.x - 2, basePosition.y + 5, basePosition.z),
+        //         scale: new Vec3(baseScale.x * 0.97, baseScale.y * 1.03, baseScale.z),
+        //         eulerAngles: new Vec3(baseRotation.x, baseRotation.y, baseRotation.z - rotationAmount * 0.35)
+        //     }, { easing: 'sineOut' })
+        //     // SHAKE PHASE 1: Tremor downward (smooth, not jarring)
+        //     .to(0.45, {
+        //         position: new Vec3(basePosition.x + 2.5, basePosition.y - 4, basePosition.z),
+        //         scale: new Vec3(baseScale.x * 1.02, baseScale.y * 0.98, baseScale.z),
+        //         eulerAngles: new Vec3(baseRotation.x, baseRotation.y, baseRotation.z + rotationAmount * 0.4)
+        //     }, { easing: 'sineInOut' })
+        //     // SHAKE PHASE 2: Tremor upward (continuation of shudder)
+        //     .to(0.4, {
+        //         position: new Vec3(basePosition.x - 1.5, basePosition.y + 3, basePosition.z),
+        //         scale: new Vec3(baseScale.x * 0.98, baseScale.y * 1.02, baseScale.z),
+        //         eulerAngles: new Vec3(baseRotation.x, baseRotation.y, baseRotation.z + rotationAmount * 0.2)
+        //     }, { easing: 'sineInOut' })
+        //     // RECOVERY PHASE: Gradual return to rest
+        //     .to(0.6, {
+        //         position: new Vec3(basePosition.x + 0.5, basePosition.y + 1, basePosition.z),
+        //         scale: new Vec3(baseScale.x * 0.99, baseScale.y * 1.01, baseScale.z),
+        //         eulerAngles: new Vec3(baseRotation.x, baseRotation.y, baseRotation.z + rotationAmount * 0.08)
+        //     }, { easing: 'quadInOut' })
+        //     // SETTLE: Return to baseline
+        //     .to(0.5, {
+        //         position: basePosition,
+        //         scale: baseScale,
+        //         eulerAngles: baseRotation
+        //     }, { easing: 'quadOut' })
+        //     // Breathing pause (catching breath)
+        //     .delay(0.6)
+        //     .union()
+        //     .repeatForever()
+        //     .start();
     }
     
     private playTapTutorial(targetNode: Node, showInstruction: boolean) {
